@@ -34,7 +34,7 @@ src/
 │   ├── welcome.js        Welcome messages, auto-role, /welcome
 │   └── help.js           /help card
 └── lib/
-    ├── store.js          Storage: JSON file (atomic writes + .bak) or MongoDB
+    ├── store.js          Storage: JSON file (atomic writes + .bak) or MongoDB (waits for the DB, retries saves)
     ├── ui.js             Components V2 helpers (cards, notices, replies, command mentions)
     ├── card.js           Welcome banner renderer (1200×480 PNG)
     ├── utils.js          Parsing, emoji handling, permission checks, file downloads
@@ -88,6 +88,8 @@ One record per server:
 | `npm start` | Run the bot (needs `DISCORD_TOKEN`) |
 | `npm test` | Self-test + end-to-end flows. Offline: no token or Discord connection needed |
 | `npm run preview` | Rebuild `docs/previews/ui-preview.html` and `docs/previews/welcome-card.png` |
+
+To test with MongoDB, set `MONGODB_URI` (and a throw-away `MONGODB_DB`) before `node tests/flowtest.js`. The self-test always uses a temporary JSON file. `MONGODB_CONNECT_ATTEMPTS` (default 8, about 3 minutes) controls how long the bot waits for the database at startup.
 
 Run `npm test` after every change. It catches layouts that Discord would reject (too many components, text over 4,000 characters, bad custom IDs …) before you deploy.
 

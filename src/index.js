@@ -131,7 +131,9 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
   await store.init();
   await client.login(config.token);
 })().catch((err) => {
-  if (/disallowed intents|privileged intent/i.test(String(err?.message))) {
+  if (err instanceof store.StorageError) {
+    log.error(`Database problem: ${err.message}`);
+  } else if (/disallowed intents|privileged intent/i.test(String(err?.message))) {
     log.error('Discord refused the connection: enable **Server Members Intent** in the Developer Portal → your app → Bot → Privileged Gateway Intents, then restart.');
   } else if (err?.code === 'TokenInvalid' || /token/i.test(String(err?.message))) {
     log.error('The DISCORD_TOKEN is invalid. Reset it in the Developer Portal → Bot → Reset Token and update your environment variable.');

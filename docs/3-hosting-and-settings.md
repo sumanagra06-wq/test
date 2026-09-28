@@ -16,7 +16,7 @@ On **Railway**, add these under your service → **Variables**. On your PC, copy
 | Variable | Required | Description |
 |---|---|---|
 | `DISCORD_TOKEN` | ✅ | Bot token from the Developer Portal |
-| `MONGODB_URI` | | MongoDB connection string. If empty, a JSON file is used |
+| `MONGODB_URI` | on Railway | MongoDB connection string. On Railway set it to `${{MongoDB.MONGO_URL}}` (a variable named `MONGO_URL` is accepted too). If empty, a JSON file is used |
 | `MONGODB_DB` | | Database name (default `aetherbrackets`) |
 | `DATA_DIR` | | Folder for the JSON file (default: Railway volume if attached, else `./data`) |
 | `BRAND_NAME` | | Name shown on announcements (default `AetherBrackets`) |
@@ -26,12 +26,21 @@ On **Railway**, add these under your service → **Variables**. On your PC, copy
 
 ## Where your data is stored
 
-Button-role panels, reaction roles, welcome settings and announcement records are saved per server. The `Storage: …` line in the logs shows which option is active (`Storage: MongoDB` or `Storage: JSON file in /data`).
+Button-role panels, reaction roles, welcome settings and announcement records are saved per server. The `Storage: …` line in the logs shows which option is active.
 
-| Option | How it works | Survives redeploys? |
+| Option | How to set it up | Survives redeploys? |
 |---|---|---|
-| **JSON file** (default) | Saved as `aetherbrackets-db.json` (plus a `.bak` backup). The folder is `DATA_DIR` if set, otherwise the attached Railway Volume, otherwise `./data` | ✅ with a Railway Volume or persistent disk · ❌ without one |
-| **MongoDB** | Set `MONGODB_URI` (e.g. a free MongoDB Atlas cluster). Data goes into the `guilds` collection of the `MONGODB_DB` database | ✅ on any host |
+| **MongoDB on Railway** (recommended) | **+ New → Database → MongoDB** in your Railway project, then `MONGODB_URI=${{MongoDB.MONGO_URL}}` on the bot service ([Setup guide, step 3](1-setup-guide.md#3-deploy-on-railway)). Traffic stays on Railway's private network | ✅ |
+| **MongoDB elsewhere** | Any MongoDB connection string in `MONGODB_URI`, e.g. a free MongoDB Atlas cluster | ✅ |
+| **JSON file** (when no `MONGODB_URI`) | Saved as `aetherbrackets-db.json` (plus a `.bak` backup). The folder is `DATA_DIR` if set, otherwise the attached Railway Volume, otherwise `./data` | ✅ with a Railway Volume or persistent disk · ❌ without one |
+
+Data goes into the `guilds` collection of the `MONGODB_DB` database (default `aetherbrackets`), one document per Discord server.
+
+**Built-in safety:**
+- At startup the bot **waits for the database** for about 3 minutes (for example while MongoDB is still starting on a first deploy), then stops with a clear message if it still can't connect.
+- If the database goes down **while the bot is running**, the bot keeps working, holds the changes in memory and retries saving every 10 seconds until the database is back.
+- A wrong password or a mistyped reference stops the bot immediately with a message that explains the fix ([Troubleshooting](4-troubleshooting.md)).
+- On Railway without a database or volume, the logs show a warning that settings would be lost on the next deploy.
 
 > Announcement **previews** (not yet published) are kept in memory for 30 minutes only, so a restart or redeploy discards them. Published announcements are saved normally.
 

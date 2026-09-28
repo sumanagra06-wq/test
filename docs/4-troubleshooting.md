@@ -12,7 +12,12 @@ First step for almost every problem: open **Railway → your service → Deploym
 | Slash commands don't show | Re-invite with the link from the [Setup guide](1-setup-guide.md#4-invite-the-bot--fix-the-role-order) (it includes `applications.commands`), then restart Discord (Ctrl+R) |
 | “My role must be above…” / roles not given | Server Settings → Roles → drag the bot's role above the roles it manages |
 | Welcome not posting | Run `/welcome settings`: status must be 🟢 and the bot needs View/Send/Attach Files in that channel |
-| Settings disappear after a redeploy | Attach a Railway Volume ([Setup guide, step 3](1-setup-guide.md#3-deploy-on-railway)) or set `MONGODB_URI` |
+| Settings disappear after a redeploy | Connect the MongoDB database ([Setup guide, step 3](1-setup-guide.md#3-deploy-on-railway)), or attach a Railway Volume |
+| Logs warn **“No database connected … will be LOST on the next deploy”** | The bot has no `MONGODB_URI`. Add the MongoDB database and the `MONGODB_URI=${{MongoDB.MONGO_URL}}` variable ([Setup guide, step 3](1-setup-guide.md#3-deploy-on-railway)) |
+| Logs say **“MongoDB … is not reachable yet”** once or twice, then **“connected ✓”** | Normal on a first deploy while the database starts. Nothing to do |
+| Logs say **“Database problem: Could not reach MongoDB”** | Check the MongoDB service is running (green) in the **same** Railway project and environment, and that `MONGODB_URI` is exactly `${{MongoDB.MONGO_URL}}` |
+| Logs say **“… a Railway reference that was not filled in”** | The name before the dot doesn't match your database service. Use its exact name, e.g. `${{MongoDB.MONGO_URL}}` |
+| Logs say **“rejected the username/password”** | The connection string was typed or copied by hand. Replace it with the reference `${{MongoDB.MONGO_URL}}` |
 | Announcement files missing | The bot needs **Attach Files** in that channel; files must fit your server's upload limit |
 | **Draft expired** on an announcement preview | Previews last 30 minutes and are cleared when the bot restarts. Run `/announce` again |
 | A button-role panel message was deleted | `/buttonroles repost panel:<name>` restores it with all roles. A banner image is lost with the deleted message, so add it again with `/buttonroles edit panel:<name> banner:<image>` |

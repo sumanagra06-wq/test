@@ -31,9 +31,11 @@ Railway deploys straight from a GitHub repository.
 **Easiest (website):**
 1. Unzip the download.
 2. On github.com, create a new **private** repository → click **uploading an existing file**.
-3. Open the `aetherbrackets-bot` folder, select **everything inside it** and drag it onto the page. The folders (`src`, `docs`, `assets` …) keep their structure.
-4. Click **Commit changes**.
+3. Open the `aetherbrackets-bot` folder, select **everything inside it** (the folders too) and drag it onto the page.
+4. Click **Commit changes**, then check the repository shows the folders `src`, `docs`, `assets`, `tests`, `tools`.
 
+> ⚠️ If all the files end up side by side with no folders (for example `index.js` next to `README.md`), the bot can't start. Drag the **folders** themselves, or use git (below), which always keeps the structure.
+>
 > On a Mac, press **⌘ Shift .** in Finder to show hidden files, so `.gitignore`, `.dockerignore` and `.env.example` are uploaded too.
 
 **With git:**
@@ -48,20 +50,37 @@ git push -u origin main
 
 ## 3. Deploy on Railway
 
-1. Sign in at **https://railway.com** with GitHub → **New Project** → **Deploy from GitHub repo** → pick `aetherbrackets-bot`. Railway finds the included `Dockerfile` and builds it automatically.
-2. Open the service → **Variables** → **New Variable** → name `DISCORD_TOKEN`, value = your token → apply/deploy.
-3. **Add a Volume so your settings survive redeploys:** on the project canvas, right-click (or press ⌘K / Ctrl+K) → **Volume** → attach it to the bot service → mount path **`/data`**.
-   The bot detects Railway volumes automatically (`RAILWAY_VOLUME_MOUNT_PATH`), so nothing else needs configuring.
-   *Prefer a database instead? Set `MONGODB_URI` (e.g. a free MongoDB Atlas cluster) and skip the volume.*
-4. Open **Deployments → View logs**. You should see:
+Your Railway project will contain two services: the **bot** (built from your GitHub repository) and a **MongoDB database** where the bot saves panels, reaction roles, welcome settings and announcements.
+
+1. **Create the bot service:** sign in at **https://railway.com** with GitHub → **New Project** → **Deploy from GitHub repo** → pick your repository. If it isn't in the list, click **Configure GitHub App** and give Railway access to it.
+   Railway finds the included `Dockerfile` and builds it automatically. *The first start stops with “DISCORD_TOKEN is missing”. That's expected: you add the token in step 3.*
+2. **Add the database:** on the project canvas click **+ New** (or press Ctrl+K / ⌘K) → **Database** → **MongoDB**. Railway creates a service named **MongoDB** with its own storage.
+3. **Connect the bot:** click the bot service → **Variables** → **Raw Editor**, paste these two lines, put your bot token in the first one → **Update Variables**:
    ```
-   Storage: JSON file in /data
+   DISCORD_TOKEN=paste-your-bot-token-here
+   MONGODB_URI=${{MongoDB.MONGO_URL}}
+   ```
+   Then click **Deploy** to apply the changes.
+   - `${{MongoDB.MONGO_URL}}` is a Railway *reference*: Railway fills in the database's private address and password for you, so never type them by hand. If your database service has another name, put that name before the dot.
+   - Optional: click **⋮** next to `DISCORD_TOKEN` → **Seal**, so the token can never be shown again in the dashboard.
+4. Open the bot service → **Deployments → View logs**. You should see something like:
+   ```
+   Storage: MongoDB at mongodb.railway.internal:27017 — connecting…
+   Storage: MongoDB connected ✓ (database "aetherbrackets", 0 server(s) loaded)
    Logged in as AetherBrackets#1234 — in 0 server(s)
    Invite link: https://discord.com/oauth2/authorize?...
    ```
-5. Done. The bot doesn't need a public domain or port. Leave **Serverless / app sleeping** off. Every push to GitHub redeploys automatically.
+   On the very first deploy you may see “MongoDB … is not reachable yet” once or twice while the database starts. The bot waits for it automatically.
+5. **Done.** Keep these defaults in the bot service's **Settings**:
+   - **Serverless** (app sleeping): **off**, because a sleeping bot goes offline in Discord.
+   - **Replicas: 1**. Two copies would answer every click twice.
+   - No public domain or port is needed.
 
-> Railway is a paid platform after its trial. Check their current pricing; a single-server bot like this uses very little CPU and memory.
+   Every push to GitHub redeploys the bot automatically. Your settings stay in the database.
+
+> **No database?** Skip step 2 and the `MONGODB_URI` line in step 3, and instead attach a **Volume** to the bot service (right-click the canvas → **Volume** → mount path **`/data`**). The bot then saves to a file on the volume.
+>
+> Railway is a paid platform after its trial. Check their current pricing; a single-server bot and a small database use very little CPU and memory.
 
 ## 4. Invite the bot & fix the role order
 

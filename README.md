@@ -19,7 +19,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 
 1. **Create the bot** in the Discord Developer Portal, copy its **token** and turn on **Server Members Intent**. → [details](docs/1-setup-guide.md#1-create-the-bot-in-discord)
 2. **Upload this folder** to a private GitHub repository. → [details](docs/1-setup-guide.md#2-put-the-code-on-github)
-3. **Deploy on Railway:** Deploy from GitHub repo → add the `DISCORD_TOKEN` variable → attach a Volume at `/data`. → [details](docs/1-setup-guide.md#3-deploy-on-railway)
+3. **Deploy on Railway:** Deploy from GitHub repo → **+ New → Database → MongoDB** → on the bot service add `DISCORD_TOKEN` and `MONGODB_URI=${{MongoDB.MONGO_URL}}`. → [details](docs/1-setup-guide.md#3-deploy-on-railway)
 4. **Invite the bot** with the link from the logs, then drag its role **above** the roles it should give. → [details](docs/1-setup-guide.md#4-invite-the-bot--fix-the-role-order)
 5. Type **`/help`** in your server. 🎉
 
@@ -31,7 +31,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 |---|---|
 | [1 · Setup guide](docs/1-setup-guide.md) | Create the bot, upload to GitHub, deploy on Railway, invite it, role order, who can use the commands |
 | [2 · Using the bot](docs/2-using-the-bot.md) | Every command for button roles, reaction roles, announcements and welcome |
-| [3 · Hosting & settings](docs/3-hosting-and-settings.md) | Environment variables, where data is stored, Render & other hosts, running on your PC |
+| [3 · Hosting & settings](docs/3-hosting-and-settings.md) | Environment variables, the Railway MongoDB database, Render & other hosts, running on your PC |
 | [4 · Troubleshooting](docs/4-troubleshooting.md) | Fixes for common problems |
 | [5 · Developer guide](docs/5-developer-guide.md) | Code map, how it fits together, tests, regenerating the previews |
 
