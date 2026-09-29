@@ -71,7 +71,7 @@ async function resolveMessage(interaction, input) {
   const channelId = ref.channelId ?? saved?.channelId ?? interaction.channelId;
   const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased()) throw new UserError('I couldn’t find that channel.');
-  const message = await channel.messages.fetch(ref.messageId).catch(() => null);
+  const message = await channel.messages.fetch({ message: ref.messageId, force: true }).catch(() => null);
   if (!message) {
     throw new UserError(
       ref.channelId ? 'I couldn’t find that message (or I can’t see that channel).' : 'I couldn’t find that message in this channel — paste the message **link** instead of the ID.',

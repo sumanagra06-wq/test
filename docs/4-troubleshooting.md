@@ -19,6 +19,9 @@ First step for almost every problem: open **Railway → your service → Deploym
 | Logs say **“… a Railway reference that was not filled in”** | The name before the dot doesn't match your database service. Use its exact name, e.g. `${{MongoDB.MONGO_URL}}` |
 | Logs say **“rejected the username/password”** | The connection string was typed or copied by hand. Replace it with the reference `${{MongoDB.MONGO_URL}}` |
 | Announcement files missing | The bot needs **Attach Files** in that channel; files must fit your server's upload limit |
+| Logs say **“Discord had a temporary problem (503 …)”** or users saw **“The application did not respond”** | Discord’s own servers had a short outage (5xx errors come from Discord, not the bot). Just try again; check **https://discordstatus.com** if it keeps happening |
+| An older announcement has the ping only on its **first** part | Posted before this fix. Right-click it → **Edit Announcement** → **Submit**: every part gets the ping and the highlight, and nobody is pinged again |
+| **Edit Announcement** says the first message had been deleted | Someone deleted part 1. The edit still worked and the announcement now starts at its next part. Attachments that were on the deleted part must be added again |
 | **Draft expired** on an announcement preview | Previews last 30 minutes and are cleared when the bot restarts. Run `/announce` again |
 | A button-role panel message was deleted | `/buttonroles repost panel:<name>` restores it with all roles. A banner image is lost with the deleted message, so add it again with `/buttonroles edit panel:<name> banner:<image>` |
 

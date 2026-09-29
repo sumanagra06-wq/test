@@ -429,7 +429,8 @@ async function fetchPanelMessage(guild, panel) {
   const gone = (codes) => (err) => (codes.includes(err?.code) ? null : Promise.reject(err));
   const channel = await guild.channels.fetch(panel.channelId).catch(gone([10003]));
   if (!channel?.isTextBased()) return { channel: null, message: null };
-  const message = await channel.messages.fetch(panel.messageId).catch(gone([10008]));
+  // force: ask Discord, not the cache — the panel may have been deleted without the bot noticing
+  const message = await channel.messages.fetch({ message: panel.messageId, force: true }).catch(gone([10008]));
   return { channel, message };
 }
 

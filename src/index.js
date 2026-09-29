@@ -14,6 +14,7 @@ const config = require('./config');
 const store = require('./lib/store');
 const log = require('./lib/log');
 const ui = require('./lib/ui');
+const { isDiscordHiccup, hiccupText } = require('./lib/utils');
 const { commands } = require('./commands');
 const handleInteraction = require('./interactions');
 const welcome = require('./features/welcome');
@@ -69,7 +70,11 @@ async function registerCommands(guild) {
 const safe = (label, fn) => (...args) =>
   Promise.resolve()
     .then(() => fn(...args))
-    .catch((err) => log.error(`${label} failed:`, err));
+    .catch((err) =>
+      isDiscordHiccup(err)
+        ? log.warn(`${label} skipped — Discord had a temporary problem (${hiccupText(err)}).`)
+        : log.error(`${label} failed:`, err),
+    );
 
 client.once(Events.ClientReady, async (c) => {
   log.info(`Logged in as ${c.user.tag} — in ${c.guilds.cache.size} server(s)`);

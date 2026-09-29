@@ -224,6 +224,12 @@ function panel(style, mode, n, extra = {}) {
       const v = validatePayload(`${name} preview`, preview);
       results.push([`announcement: ${name} (${parts.length} msg)`, v]);
       if (fields.ping === 'everyone') assert.deepEqual(parts[0].allowedMentions, { parse: ['users', 'everyone'] });
+      parts.forEach((p, i) => {
+        // every part pings the same way; parts 2+ are silent (one notification per announcement)
+        if (fields.ping) assert.match(JSON.stringify(p.components[0]), /@everyone|<@&\d+>/, `${name}: part ${i + 1} must carry the ping`);
+        assert.deepEqual(p.allowedMentions, parts[0].allowedMentions, `${name}: part ${i + 1} mentions differ`);
+        assert.equal(Boolean(p.flags & MessageFlags.SuppressNotifications), i > 0, `${name}: only parts 2+ are silent`);
+      });
       assert.deepEqual(preview.allowedMentions, { parse: [] }, 'previews must never ping');
     });
   }

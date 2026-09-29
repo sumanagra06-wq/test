@@ -12,6 +12,21 @@ class UserError extends Error {
   }
 }
 
+const NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT']);
+
+/**
+ * True when Discord's own servers failed (HTTP 5xx) or the connection to Discord dropped/timed out.
+ * These are temporary problems on Discord's side, not bugs in the bot — trying again usually works.
+ */
+function isDiscordHiccup(err) {
+  return (err?.name === 'HTTPError' && err.status >= 500) || err?.name === 'AbortError' || NETWORK_CODES.has(err?.code);
+}
+
+/** Short description of a Discord hiccup for the logs, e.g. "503 Service Unavailable". */
+function hiccupText(err) {
+  return [err?.status ?? err?.code ?? err?.name, err?.message].filter(Boolean).join(' ');
+}
+
 /* ────────────────────────── text helpers ────────────────────────── */
 
 function truncate(str, max) {
@@ -297,6 +312,8 @@ async function downloadAttachments(attachments, { maxTotal = 200 * 1024 * 1024 }
 
 module.exports = {
   UserError,
+  isDiscordHiccup,
+  hiccupText,
   truncate,
   ordinal,
   fillTemplate,

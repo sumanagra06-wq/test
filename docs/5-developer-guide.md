@@ -77,7 +77,7 @@ One record per server:
   welcome:       { enabled, channelId, title, message, imageSubtitle, image, background, color, ping, rulesChannelId, rolesChannelId, autoRoleId },
   reactionRoles: { [messageId]: { channelId, mode, panel?, entries: [...] } },
   buttonPanels:  { [panelId]:   { ...panel settings and roles } },
-  announcements: { [firstMessageId]: { ...record used by “Edit Announcement” } },
+  announcements: { [firstMessageId]: { ...record used by “Edit Announcement” } },  // re-keyed to the next part if part 1 is deleted
 }
 ```
 

@@ -9,7 +9,7 @@ process.env.DATA_DIR = require('node:path').join(require('node:os').tmpdir(), `a
 
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { ChannelType, Collection, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const { ChannelType, Collection, MessageFlags, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 const { createCanvas } = require('@napi-rs/canvas');
 const { validatePayload, toJSON } = require('./helpers/validate');
 
@@ -18,6 +18,7 @@ const log = require('../src/lib/log');
 const handleInteraction = require('../src/interactions');
 const welcome = require('../src/features/welcome');
 const reactionRoles = require('../src/features/reactionRoles');
+const announcements = require('../src/features/announcements');
 
 /* fail on any unexpected error the bot logs */
 const unexpected = [];
@@ -114,6 +115,7 @@ function mockMessage(channel, payload, extra = {}) {
     attachments: attachmentsFrom(payload?.files),
     reactions: { cache: new Collection(), removeAll: async () => m.reactions.cache.clear() },
     async edit(p) {
+      if (m.goneOnDiscord) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
       if (p.attachments && p.attachments.length === 0) m.attachments = attachmentsFrom(p.files);
       m.payload = p;
       edits.push(p);
@@ -151,9 +153,11 @@ function mockChannel(id, name, type = ChannelType.GuildText) {
       return m;
     },
     messages: {
-      fetch: async (mid) => {
+      fetch: async (arg) => {
+        const { message: mid, force = false } = typeof arg === 'string' ? { message: arg } : arg;
         const m = ch._messages.get(mid);
-        if (!m) throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+        // goneOnDiscord = deleted on Discord, but the bot never got the event, so it's still in its cache
+        if (!m || (m.goneOnDiscord && force)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
         return m;
       },
     },
@@ -295,6 +299,8 @@ function interaction({ type, commandName, sub, options = {}, customId, fields = 
 }
 
 const texts = (payload) => JSON.stringify((payload?.components ?? []).map(toJSON));
+const pingLine = (payload) => toJSON(payload.components[0]).content;
+const isSilent = (payload) => Boolean(payload.flags & MessageFlags.SuppressNotifications);
 
 /** Runs an interaction and returns the final response; asserts no unexpected errors. */
 async function run(name, spec, { expectError = false } = {}) {
@@ -554,10 +560,110 @@ async function step(name, fn) {
   await step('Edit Announcement (longer text → extra parts, files carried over)', async () => {
     const { payload } = await run('edit ctx', { type: 'context', commandName: 'Edit Announcement', targetMessage: announcement });
     const long = 'A long paragraph about the new season. '.repeat(100);
+    const editsBefore = edits.length;
+    const sentBefore = sent.length;
     await run('edit ctx submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 3 is HERE', body: long, more: long, footer: '' } });
     const rec = g().announcements[announcement.id];
     assert.ok(rec.messageIds.length >= 2, 'long edit should span multiple messages');
     assert.equal(rec.files.length, 2);
+    // edits keep the ping + its mentions (so the gold highlight stays; edits never notify)
+    for (const p of edits.slice(editsBefore)) {
+      assert.equal(pingLine(p), '@everyone', 'edited part keeps the ping');
+      assert.deepEqual(p.allowedMentions, { parse: ['users', 'everyone'] }, 'edits must keep the mentions');
+      assert.equal(isSilent(p), false, 'edits never carry the silent flag');
+    }
+    // parts the edit had to add are pinged too, silently
+    assert.ok(sent.length > sentBefore);
+    for (const m of sent.slice(sentBefore)) {
+      assert.equal(pingLine(m.payload), '@everyone', 'added part pings');
+      assert.ok(isSilent(m.payload), 'added part is silent');
+    }
+  });
+
+  let longParts;
+  await step('long announcement → every part pings (parts 2+ silently)', async () => {
+    const { payload } = await run('announce long', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: 'everyone' } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Brackets, rules and prizes for the new season. '.repeat(120);
+    const preview = await run('announce long submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 4', body: long, more: long, footer: '' } });
+    assert.ok(texts(preview.payload).includes('in every part (notified once)'), 'preview explains the pings');
+    const before = sent.length;
+    await run('publish long', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    longParts = sent.slice(before);
+    assert.ok(longParts.length >= 2, 'should be split into several messages');
+    longParts.forEach((m, i) => {
+      assert.equal(pingLine(m.payload), '@everyone', `part ${i + 1} must ping`);
+      assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, `part ${i + 1} must be allowed to mention`);
+      assert.equal(isSilent(m.payload), i > 0, `part ${i + 1}: only parts 2+ are silent`);
+      validatePayload(`long part ${i + 1}`, m.payload, { ephemeralOk: false });
+    });
+  });
+
+  await step('Edit Announcement when part 1 was deleted without the bot noticing (stale cache)', async () => {
+    const [first, second] = longParts;
+    first.goneOnDiscord = true; // deleted on Discord, the delete event was missed → still in the bot's cache
+    const { payload } = await run('edit stale ctx', { type: 'context', commandName: 'Edit Announcement', targetMessage: second });
+    assert.equal(payload.custom_id, `an:editpost:${first.id}`);
+    const r = await run('edit stale submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 4 (updated)', body: 'Now short.', footer: '' } });
+    assert.ok(texts(r.payload).includes('first message had been deleted'), 'tells the user what happened');
+    assert.equal(g().announcements[first.id], undefined, 'old key dropped');
+    assert.deepEqual(g().announcements[second.id]?.messageIds, [second.id], 'announcement continues from part 2');
+    assert.ok(texts(second.payload).includes('Season 4 (updated)'), 'remaining message shows the new title');
+    assert.equal(pingLine(second.payload), '@everyone');
+    assert.ok(longParts.slice(2).every((m) => m.deleted), 'leftover parts removed');
+  });
+
+  await step('deleting part 1 keeps the rest editable; deleting all forgets it', async () => {
+    const { payload } = await run('announce long 2', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: R.valorant.id } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Scrim schedule and check-in rules for every team. '.repeat(120);
+    await run('announce long 2 submit', { type: 'modal', customId: payload.custom_id, fields: { body: long, more: long } });
+    const before = sent.length;
+    await run('publish long 2', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    const parts = sent.slice(before);
+    assert.ok(parts.length >= 2);
+    for (const m of parts) assert.deepEqual(m.payload.allowedMentions, { parse: ['users'], roles: [R.valorant.id] });
+    announcements.onMessageDelete(GUILD_ID, parts[0].id);
+    assert.equal(g().announcements[parts[0].id], undefined);
+    assert.deepEqual(g().announcements[parts[1].id]?.messageIds, parts.slice(1).map((m) => m.id));
+    const ctx = await run('edit after delete ctx', { type: 'context', commandName: 'Edit Announcement', targetMessage: parts[1] });
+    assert.equal(ctx.payload.custom_id, `an:editpost:${parts[1].id}`);
+    for (const m of parts.slice(1)) announcements.onMessageDelete(GUILD_ID, m.id);
+    assert.ok(!Object.values(g().announcements).some((rec) => rec.messageIds.includes(parts[1].id)), 'record removed');
+  });
+
+  await step('Edit Announcement when every part is gone → friendly message', async () => {
+    const { payload } = await run('announce gone', { type: 'slash', commandName: 'announce', options: { channel: C.news } });
+    const sid = payload.custom_id.split(':')[2];
+    await run('announce gone submit', { type: 'modal', customId: payload.custom_id, fields: { body: 'Short one.' } });
+    await run('publish gone', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    const msg = sent.at(-1);
+    const ctx = await run('edit gone ctx', { type: 'context', commandName: 'Edit Announcement', targetMessage: msg });
+    msg.goneOnDiscord = true;
+    const r = await run('edit gone submit', { type: 'modal', customId: ctx.payload.custom_id, fields: { body: 'Edited' } }, { expectError: true });
+    assert.ok(texts(r.payload).includes('Announcement deleted'));
+    assert.equal(g().announcements[msg.id], undefined);
+  });
+
+  await step('Discord 503 while opening a form → one calm warning, no error', async () => {
+    const warnings = [];
+    const realWarn = log.warn;
+    log.warn = (...a) => warnings.push(a.join(' '));
+    try {
+      const i = interaction({ type: 'slash', commandName: 'announce', options: { channel: C.news } });
+      i.showModal = async () => {
+        throw Object.assign(new Error('Service Unavailable'), { name: 'HTTPError', status: 503 });
+      };
+      i.reply = async () => {
+        throw Object.assign(new Error('Unknown interaction'), { code: 10062 });
+      };
+      await handleInteraction(i);
+    } finally {
+      log.warn = realWarn;
+    }
+    assert.equal(unexpected.length, 0, `no errors expected: ${unexpected.join(' | ')}`);
+    assert.ok(warnings.some((w) => w.includes('temporary problem') && w.includes('503')), warnings.join(' | '));
+    assert.ok(warnings.some((w) => w.includes('already expired')), warnings.join(' | '));
   });
 
   await step('Post as Announcement (draft with files) → publish', async () => {

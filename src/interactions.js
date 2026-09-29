@@ -2,7 +2,7 @@
 const config = require('./config');
 const log = require('./lib/log');
 const ui = require('./lib/ui');
-const { UserError } = require('./lib/utils');
+const { UserError, isDiscordHiccup, hiccupText } = require('./lib/utils');
 const { NAMED_COLORS, parseColor, toHex } = require('./lib/color');
 const announcements = require('./features/announcements');
 const buttonRoles = require('./features/buttonRoles');
@@ -109,11 +109,23 @@ module.exports = async function handleInteraction(interaction) {
     await route(interaction);
   } catch (err) {
     if (interaction.isAutocomplete()) return log.warn('Autocomplete failed:', err.message);
-    if (err?.code === 10062) return log.warn(`Interaction expired before I could answer (${describe(interaction)}).`);
+    const where = describe(interaction);
+    if (err?.code === 10062) return log.warn(`Interaction expired before I could answer (${where}).`);
     const expected = err instanceof UserError;
-    if (!expected) log.error(`Interaction failed (${describe(interaction)}):`, err);
-    const payload = expected ? ui.notice('error', err.title, err.message) : ui.notice('error', 'Something went wrong', explain(err));
-    await ui.respond(interaction, payload).catch((e) => log.error('Could not send the error message:', e.message));
+    const hiccup = !expected && isDiscordHiccup(err);
+    // Discord's own servers failing (e.g. 503) is not a bot bug: one calm line instead of a stack trace
+    if (hiccup) log.warn(`Discord had a temporary problem (${hiccupText(err)}) during ${where} — not a bot error; trying again usually works.`);
+    else if (!expected) log.error(`Interaction failed (${where}):`, err);
+    const payload = expected
+      ? ui.notice('error', err.title, err.message)
+      : hiccup
+        ? ui.notice('error', 'Discord is having trouble', 'Discord’s servers didn’t respond in time. Please try again in a moment.')
+        : ui.notice('error', 'Something went wrong', explain(err));
+    await ui.respond(interaction, payload).catch((e) => {
+      if (e?.code === 10062 || e?.code === 40060 || isDiscordHiccup(e)) {
+        log.warn(`Couldn’t show the error message either — the interaction had already expired (${where}).`);
+      } else log.error('Could not send the error message:', e.message);
+    });
   }
 };
 

@@ -147,15 +147,17 @@ function buildParts(a, body, chunkSize, preview) {
     if (!blocks.length) blocks.push(ui.text('\u200b'));
 
     const components = [];
-    if (i === 0 && a.ping) components.push(ui.text(pingText(a.ping)));
+    // every part carries the ping, so a long announcement is highlighted the same way from top to bottom
+    if (a.ping) components.push(ui.text(pingText(a.ping)));
     if (card) components.push(ui.fillContainer(ui.container(color), blocks));
     else components.push(...blocks);
 
     parts.push({
       components,
       files: files.map((f) => new AttachmentBuilder(f.buffer, { name: f.name })),
-      flags: ui.V2,
-      allowedMentions: preview ? { parse: [] } : i === 0 ? allowedMentionsFor(a.ping) : { parse: ['users'] },
+      // parts 2+ are sent "silently": same mentions and highlight, but no second push/desktop notification
+      flags: i > 0 && !preview ? ui.V2 | MessageFlags.SuppressNotifications : ui.V2,
+      allowedMentions: preview ? { parse: [] } : allowedMentionsFor(a.ping),
     });
   }
   return parts;
@@ -167,7 +169,7 @@ function renderPreview(guild, session, { skipFiles = false } = {}) {
   const first = parts[0];
   const info = [
     `Posting to <#${s.channelId}>`,
-    s.ping ? `pings **${pingLabel(guild, s.ping)}**` : null,
+    s.ping ? `pings **${pingLabel(guild, s.ping)}**${parts.length > 1 ? ' in every part (notified once)' : ''}` : null,
     parts.length > 1 ? `**${parts.length} messages** (showing part 1)` : null,
     s.crosspost ? 'auto-publish to followers' : null,
   ]
@@ -370,6 +372,16 @@ function findRecord(guildId, messageId) {
   return Object.entries(all).find(([, r]) => r.messageIds.includes(messageId)) ?? [null, null];
 }
 
+/** Fetches a message straight from Discord (skipping the cache). Deleted → null; other errors are thrown. */
+async function fetchFresh(channel, messageId) {
+  try {
+    return await channel.messages.fetch({ message: messageId, force: true });
+  } catch (err) {
+    if (err?.code === 10008) return null;
+    throw err;
+  }
+}
+
 /** Re-downloads the files already on an announcement so they survive an edit. */
 async function carryOverFiles(rec, messages) {
   const out = [];
@@ -443,13 +455,21 @@ async function onModal(interaction) {
 
   if (action === 'editpost') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const rec = store.guild(guild.id).announcements[id];
+    const g = store.guild(guild.id);
+    const rec = g.announcements[id];
     if (!rec) throw new UserError('That announcement is no longer tracked.');
     const channel = getChannel(guild, rec.channelId);
-    const messages = await Promise.all(rec.messageIds.map((mid) => channel.messages.fetch(mid).catch(() => null)));
-    if (!messages[0]) throw new UserError('The original message was deleted.');
+    // ask Discord, not the bot's memory — a part may have been deleted without the bot noticing
+    const messages = await Promise.all(rec.messageIds.map((mid) => fetchFresh(channel, mid)));
+    const live = messages.filter(Boolean);
+    if (!live.length) {
+      delete g.announcements[id];
+      store.save(guild.id);
+      throw new UserError('Every message of this announcement was deleted, so there’s nothing left to edit. Post it again with `/announce`.', 'Announcement deleted');
+    }
     const uploads = readUploads(interaction, 'files');
-    const files = uploads.length ? await downloadAttachments(uploads) : await carryOverFiles(rec, messages);
+    const files = uploads.length ? await downloadAttachments(uploads) : await carryOverFiles(rec, live);
+    const lostFiles = uploads.length ? 0 : rec.files.length - files.length;
     const a = {
       ...rec,
       title: readText(interaction, 'title'),
@@ -460,15 +480,19 @@ async function onModal(interaction) {
     };
     assertHasContent(a);
     const parts = renderAnnouncement(a);
-    const live = messages.filter(Boolean);
     let appended = 0;
-    for (let i = 0; i < parts.length; i++) {
-      const payload = { ...parts[i], allowedMentions: { parse: [] } };
-      if (live[i]) await live[i].edit({ ...payload, attachments: [] });
-      else {
-        live.push(await channel.send(payload));
-        appended++;
+    try {
+      for (let i = 0; i < parts.length; i++) {
+        // keeps the ping's mentions so every part stays highlighted — edits never notify anyone
+        if (live[i]) await live[i].edit({ ...parts[i], flags: ui.V2, attachments: [] });
+        else {
+          live.push(await channel.send(parts[i])); // extra parts go out silently (see buildParts)
+          appended++;
+        }
       }
+    } catch (err) {
+      if (err?.code === 10008) throw new UserError('A message of this announcement was deleted while I was editing it. Please try again.', 'Message deleted');
+      throw err;
     }
     for (let i = parts.length; i < live.length; i++) await live[i].delete().catch(() => {});
     Object.assign(rec, {
@@ -480,10 +504,20 @@ async function onModal(interaction) {
       messageIds: live.slice(0, parts.length).map((m) => m.id),
       editedAt: Date.now(),
     });
+    // announcements are tracked by their first message — move the record if that one was deleted
+    if (rec.messageIds[0] !== id) {
+      delete g.announcements[id];
+      g.announcements[rec.messageIds[0]] = rec;
+    }
     store.save(guild.id);
+    const notes = [
+      messages[0] ? null : '-# The first message had been deleted, so the announcement now starts at its next message.',
+      lostFiles > 0 ? `-# ${lostFiles} attachment(s) were on a deleted message and couldn’t be kept — add them again with **Edit Announcement**.` : null,
+      appended ? `-# The longer text needed ${appended} extra message(s), added at the end of the channel.` : null,
+    ].filter(Boolean);
     return interaction.editReply(
-      ui.notice('success', 'Announcement updated', appended ? `-# The longer text needed ${appended} extra message(s), added at the end of the channel.` : null, {
-        buttons: [ui.button({ label: 'Open announcement', emoji: '🔗', url: messages[0].url })],
+      ui.notice('success', 'Announcement updated', notes.join('\n') || null, {
+        buttons: [ui.button({ label: 'Open announcement', emoji: '🔗', url: live[0].url })],
       }),
     );
   }
@@ -588,12 +622,20 @@ function pingChoices(guild, query) {
   return [...base, ...roles].slice(0, 25);
 }
 
+/** Keeps records in sync when announcement messages are deleted (the rest stays editable). */
 function onMessageDelete(guildId, messageId) {
-  const g = store.guilds[guildId];
-  if (g?.announcements?.[messageId]) {
-    delete g.announcements[messageId];
-    store.save(guildId);
+  const all = store.guilds[guildId]?.announcements;
+  if (!all) return;
+  const key = all[messageId] ? messageId : Object.keys(all).find((k) => all[k].messageIds.includes(messageId));
+  if (!key) return;
+  const rec = all[key];
+  rec.messageIds = rec.messageIds.filter((mid) => mid !== messageId);
+  if (!rec.messageIds.length) delete all[key];
+  else if (rec.messageIds[0] !== key) {
+    delete all[key]; // first message gone → the announcement now starts at its next message
+    all[rec.messageIds[0]] = rec;
   }
+  store.save(guildId);
 }
 
 module.exports = {
