@@ -14,6 +14,7 @@ const reactionRoles = require('../src/features/reactionRoles');
 const announcements = require('../src/features/announcements');
 const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
+const serverIds = require('../src/features/serverIds');
 const store = require('../src/lib/store');
 const { toJSON } = require('../tests/helpers/validate');
 
@@ -128,6 +129,7 @@ function panelFrom(style, mode, list, extra = {}) {
 }
 
 /* ───────────── mini Discord renderer ───────────── */
+const fileSizes = {}; // file name → size label for file cards
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const hex = (n) => `#${(n ?? 0x7c5cff).toString(16).padStart(6, '0')}`;
 
@@ -151,8 +153,21 @@ function inline(raw) {
 
 function markdown(text) {
   let quote = false;
+  let code = null; // lines of an open ``` block
   const out = [];
   for (let line of String(text).split('\n')) {
+    if (line.startsWith('```')) {
+      if (code === null) code = [];
+      else {
+        out.push(`<pre class="codeblock">${esc(code.join('\n'))}</pre>`);
+        code = null;
+      }
+      continue;
+    }
+    if (code !== null) {
+      code.push(line);
+      continue;
+    }
     if (line.startsWith('>>> ')) {
       quote = true;
       line = line.slice(4);
@@ -197,7 +212,7 @@ function render(c, img) {
       return `<div class="gallery g${Math.min(c.items.length, 4)}">${c.items.map((i) => `<img src="${img(i.media.url)}" alt="">`).join('')}</div>`;
     case 13: {
       const name = c.file.url.replace('attachment://', '');
-      return `<div class="file"><div class="ficon">📄</div><div><div class="fname">${esc(name)}</div><div class="fsize">248.1 KB</div></div><div class="dl">⬇</div></div>`;
+      return `<div class="file"><div class="ficon">📄</div><div><div class="fname">${esc(name)}</div><div class="fsize">${fileSizes[name] ?? '248.1 KB'}</div></div><div class="dl">⬇</div></div>`;
     }
     case 1:
       return `<div class="row">${c.components.map((x) => render(x, img)).join('')}</div>`;
@@ -354,6 +369,57 @@ const avatarUri = dataUri(avatar);
 
   const helpPayload = help.helpCard(guild, { displayAvatarURL: () => 'https://cdn.discordapp.com/icons/bot.png' });
 
+  /* /ids — a realistic server map */
+  const idsGuild = (() => {
+    const { ChannelType, PermissionsBitField, PermissionFlagsBits } = require('discord.js');
+    let seq = 1553683898448220170n;
+    const nid = () => String(seq++);
+    const chans = new Map();
+    const ch = (name, type, parent = null, rawPosition = 0, priv = false) => {
+      const c = { id: nid(), name, type, parentId: parent?.id ?? null, rawPosition, isThread: () => false, permissionsFor: () => ({ has: () => !priv }) };
+      chans.set(c.id, c);
+      return c;
+    };
+    const T = ChannelType;
+    ch('welcome', T.GuildText);
+    const start = ch('📌 START HERE', T.GuildCategory, null, 0);
+    ['rules', 'announcements', 'get-roles'].forEach((n, i) => ch(n, n === 'announcements' ? T.GuildAnnouncement : T.GuildText, start, i));
+    const community = ch('💬 COMMUNITY', T.GuildCategory, null, 1);
+    ['general', 'clips', 'memes'].forEach((n, i) => ch(n, T.GuildText, community, i));
+    ch('Lounge', T.GuildVoice, community, 0);
+    const tour = ch('🏆 TOURNAMENTS', T.GuildCategory, null, 2);
+    ch('registrations', T.GuildText, tour, 0);
+    ch('brackets', T.GuildForum, tour, 1);
+    ch('results', T.GuildText, tour, 2);
+    ch('Casting Desk', T.GuildStageVoice, tour, 0);
+    ch('Match Room 1', T.GuildVoice, tour, 1);
+    ch('Match Room 2', T.GuildVoice, tour, 2);
+    const staffCat = ch('🛡️ STAFF', T.GuildCategory, null, 3, true);
+    ch('mod-chat', T.GuildText, staffCat, 0, true);
+    ch('bot-logs', T.GuildText, staffCat, 1, true);
+    ch('Staff Voice', T.GuildVoice, staffCat, 0, true);
+    const everyoneRole = { id: '1553260090864181248', name: '@everyone', position: 0, managed: false, permissions: new PermissionsBitField() };
+    const roleList = new Map([[everyoneRole.id, everyoneRole]]);
+    [
+      ['Owner', PermissionFlagsBits.Administrator],
+      ['AetherBrackets™ Official', 0n, true],
+      ['Admin', PermissionFlagsBits.Administrator],
+      ['Moderator'],
+      ['Referee'],
+      ['Caster'],
+      ['Tournament Alerts'],
+      ['Valorant'],
+      ['Rocket League'],
+      ['Member'],
+    ].forEach(([name, perms = 0n, managed = false], i, all) => {
+      const r = { id: nid(), name, position: all.length - i, managed, permissions: new PermissionsBitField(perms) };
+      roleList.set(r.id, r);
+    });
+    return { id: everyoneRole.id, name: 'AetherBrackets', channels: { cache: chans }, roles: { cache: roleList, everyone: everyoneRole } };
+  })();
+  const idsPayload = serverIds.render(idsGuild, 0);
+  fileSizes[idsPayload.files[0].name] = `${(idsPayload.files[0].attachment.length / 1024).toFixed(1)} KB`;
+
   const sections = [
     ['Button roles · List style', 'Each role gets its own row with an emoji, description and a <b>Get</b> button. Clicking replies privately — the panel never changes for others.', panelHtml(list)],
     ['Button roles · Button grid + banner', 'Compact emoji buttons (up to 20 roles) with an optional banner image and custom accent colour.', panelHtml(grid)],
@@ -368,6 +434,7 @@ const avatarUri = dataUri(avatar);
     ['Announcement preview (only you see this)', 'Every announcement is previewed privately first — Publish, Edit, switch style, or Discard.', message(annPreview, { img: imgFor({ 'attachment://season3.jpg': seasonBanner }), ephemeral: true })],
     ['Welcome · Image banner mode', 'Generated banner with the member’s avatar, name and member number, plus quick-link buttons.', message(wImage, { img: imgFor({ 'attachment://welcome.png': cardUri }) })],
     ['Welcome · Text card mode', 'Switch with <code>/welcome image enabled:false</code> — a clean card with the avatar on the side.', message(wText, { img: imgFor({}) })],
+    ['🗂️ Server IDs · /ids', 'Every category, channel and role with its ID, in sidebar order (🔒 = private). Only the admin sees it; big servers get ◀️ ▶️ page buttons, and the .txt file always has everything.', message(idsPayload, { img: imgFor({}), ephemeral: true })],
     ['/help', 'Every command in one place — command names are clickable in Discord.', message(helpPayload, { img: imgFor({}), ephemeral: true })],
   ];
 
@@ -388,6 +455,7 @@ header{padding:36px 24px 12px;max-width:1000px;margin:0 auto}header h1{margin:0 
 .h1{font-size:24px;font-weight:700;color:#fff;line-height:1.25;margin:2px 0 4px}.h2{font-size:20px;font-weight:700;color:#fff;margin:2px 0 2px}.h3{font-size:16px;font-weight:700;color:#fff}
 .sub{font-size:12.5px;color:var(--muted)}b{color:#fff}code{background:#1e1f22;padding:1px 4px;border-radius:4px;font-size:13px}a{color:var(--link);cursor:pointer}
 .quote{border-left:4px solid #4e5058;padding-left:10px}
+.codeblock{background:#1e1f22;border:1px solid #111214;border-radius:4px;padding:8px 10px;margin:2px 0;font:13px/1.45 Consolas,"DejaVu Sans Mono","Liberation Mono",Menlo,monospace;white-space:pre-wrap;word-break:break-word;color:#dbdee1}
 .section{display:flex;gap:14px;align-items:center;justify-content:space-between}.stext{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}.acc{flex:none}
 .thumb{width:84px;height:84px;border-radius:8px;object-fit:cover}
 .sep{height:1px;background:rgba(255,255,255,.08);margin:2px 0}.sep.lg{margin:8px 0}.spacer{height:4px}.spacer.lg{height:14px}

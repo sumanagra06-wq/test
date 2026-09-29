@@ -8,6 +8,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 | 😀 **Reaction roles** | Bot panels that list their roles automatically, or reaction roles on **any** existing message. Modes: normal · one-at-a-time · verify |
 | 📢 **Announcements** | Official posts under the bot's name: a big composer (2 × 4,000 characters, auto-split), up to **10 attachments**, ping @everyone/@here/roles, card or plain style, private **preview** before publishing, edit after posting, “Post as Announcement” from any draft message |
 | 👋 **Welcome** | Generated **image banner** (avatar, name, member #) **or** a clean text card — switch any time — plus Rules/Roles buttons, auto-role and custom backgrounds |
+| 🗂️ **Server IDs** | `/ids` lists **every category, channel and role with its ID** in sidebar order (private channels marked 🔒), privately and page by page, plus a `.txt` file with everything |
 
 <p align="center"><img src="docs/previews/welcome-card.png" width="720" alt="Welcome banner"></p>
 
@@ -43,6 +44,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 | `/reactionroles` | Manage Roles | `create` · `add` · `remove` · `mode` · `clear` · `list` |
 | `/announce` | Manage Server | Compose an official post: preview, ping, up to 10 attachments |
 | `/welcome` | Manage Server | `setup` · `message` · `image` · `buttons` · `autorole` · `toggle` · `test` · `settings` |
+| `/ids` | Manage Server | Every category, channel and role with its ID (private, paged, plus a .txt file) |
 | `/help` | Everyone | Clickable overview of the bot |
 | Right-click a message → **Apps** → **Post as Announcement** / **Edit Announcement** | Manage Server | Turn a draft into an official post, or edit a posted one |
 
@@ -63,7 +65,7 @@ aetherbrackets-bot/
 ├── src/                      ← the bot's code
 │   ├── index.js              ← starts the bot
 │   ├── commands.js · interactions.js · config.js
-│   ├── features/             ← buttonRoles · reactionRoles · announcements · welcome · help
+│   ├── features/             ← buttonRoles · reactionRoles · announcements · welcome · serverIds · help
 │   └── lib/                  ← storage, UI helpers, banner renderer, utilities
 ├── assets/fonts/             ← fonts for the welcome banner
 ├── tests/                    ← automated checks (npm test)

@@ -9,7 +9,7 @@ process.env.DATA_DIR = require('node:path').join(require('node:os').tmpdir(), `a
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { Collection, ComponentType, MessageFlags } = require('discord.js');
+const { ChannelType, Collection, ComponentType, MessageFlags, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 const utils = require('../src/lib/utils');
 const ui = require('../src/lib/ui');
@@ -19,6 +19,7 @@ const reactionRoles = require('../src/features/reactionRoles');
 const announcements = require('../src/features/announcements');
 const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
+const serverIds = require('../src/features/serverIds');
 const { commands } = require('../src/commands');
 const { colorChoices } = require('../src/interactions');
 
@@ -135,9 +136,88 @@ function panel(style, mode, n, extra = {}) {
     assert.equal(utils.safeFileName('🔥🔥.jpg', used), 'file.jpg');
   });
   check('commands', () => {
-    assert.equal(commands.length, 7);
+    assert.equal(commands.length, 8);
     const names = commands.map((c) => c.name);
     assert.ok(names.includes('Post as Announcement') && names.includes('announce'));
+    const ids = commands.find((c) => c.name === 'ids');
+    assert.equal(ids?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/ids is for staff');
+  });
+
+  // /ids — a big server: pages, headers, sidebar order, every ID, Discord limits
+  check('server map (/ids) on a big server', () => {
+    const everyoneRole = { id: '900000000000000000', name: '@everyone', position: 0, managed: false, permissions: new PermissionsBitField() };
+    let seq = 900000000000000001n;
+    const nid = () => String(seq++);
+    const chans = new Map();
+    const mk = (name, type, parentId = null, rawPosition = 0, priv = false, thread = false) => {
+      const c = { id: nid(), name, type, parentId, rawPosition, isThread: () => thread, permissionsFor: () => ({ has: () => !priv }) };
+      chans.set(c.id, c);
+      return c;
+    };
+    const loose = [mk('lobby-voice', ChannelType.GuildVoice, null, 0), mk('welcome', ChannelType.GuildText, null, 1), mk('rules', ChannelType.GuildText, null, 0)];
+    const cats = [];
+    for (let k = 44; k >= 0; k--) cats.push(mk(`Category ${String(k).padStart(2, '0')}`, ChannelType.GuildCategory, null, k, k === 7)); // created in reverse order
+    const empty = mk('Archive', ChannelType.GuildCategory, null, 99);
+    for (const cat of cats) {
+      for (let j = 9; j >= 0; j--) mk(j % 3 ? `chat-${j}` : `Voice ${j}`, j % 3 ? ChannelType.GuildText : ChannelType.GuildVoice, cat.id, j, j === 4);
+    }
+    const thread = mk('some-thread', ChannelType.PublicThread, cats[0].id, 0, false, true);
+    const roleMap = new Map([[everyoneRole.id, everyoneRole]]);
+    for (let i = 1; i <= 249; i++) {
+      const r = { id: nid(), name: i === 100 ? 'Weird `role` name' : `Role ${i}`, position: i, managed: i === 249, permissions: new PermissionsBitField(i === 248 ? PermissionFlagsBits.Administrator : 0n) };
+      roleMap.set(r.id, r);
+    }
+    const g = { id: everyoneRole.id, name: 'Big *Test* Server', channels: { cache: chans }, roles: { cache: roleMap, everyone: everyoneRole } };
+
+    const { lines, stats } = serverIds.buildMap(g);
+    assert.deepEqual(stats, { categories: 46, channels: 453, roles: 250 });
+    const { pages, rolesPage } = serverIds.paginate(lines);
+    assert.ok(pages.length > 5, 'big server spans several pages');
+    const text = lines.map((l) => l.text);
+    // sidebar order: loose text channels before loose voice, categories by position, text before voice inside a category
+    const idx = (needle) => text.findIndex((t) => t.includes(needle));
+    assert.ok(idx('# rules') < idx('# welcome') && idx('# welcome') < idx('🔊 lobby-voice'), 'loose channels in sidebar order');
+    assert.ok(idx('📁 Category 00') < idx('📁 Category 01') && idx('📁 Category 44') < idx('📁 Archive'), 'categories by position');
+    const c00 = idx('📁 Category 00');
+    assert.ok(text[c00 + 1].includes('# chat-1') && text[c00 + 7].includes('🔊 Voice 0'), 'text channels first, then voice');
+    assert.ok(text[idx('📁 Archive') + 1].includes('(empty)'));
+    assert.ok(text.some((t) => t.startsWith('📁 Category 07 🔒')) && text.some((t) => t.includes('# chat-4 🔒')), 'private markers');
+    assert.ok(!text.some((t) => t.includes(thread.id)), 'threads are skipped');
+    assert.ok(text.at(-1).startsWith('@everyone — '), '@everyone is last');
+    assert.ok(text.some((t) => t.includes('Role 249 🤖')) && text.some((t) => t.includes('Role 248 🛡️')));
+    assert.ok(text.some((t) => t.includes('Weird ˋroleˋ name')), 'backticks neutralised');
+    assert.ok(pages[rolesPage].some((t) => t.startsWith('ROLES ·')), 'roles button targets the roles page');
+
+    const seen = new Set();
+    pages.forEach((pg, p) => {
+      const payload = serverIds.render(g, p);
+      validatePayload(`ids page ${p + 1}`, payload);
+      const json = payload.components.map((c) => c.toJSON());
+      const block = json[0].components[1].content;
+      assert.ok(block.startsWith('```\n') && block.endsWith('\n```') && block.split('```').length === 3, `page ${p + 1}: one clean code block`);
+      if (p > 0 && pg[0].startsWith('├─') === false && pg[0].startsWith('└─') === false) assert.ok(!pg[0].startsWith(' '), `page ${p + 1} starts cleanly`);
+      if (pages[p - 1] && /^[├└]/.test(pages[p - 1].at(-1)) && /[├└]/.test(pg[0])) assert.fail(`page ${p + 1} lost its category header`);
+      const ids = [];
+      const walk = (n) => {
+        if (n.custom_id) ids.push(n.custom_id);
+        (n.components ?? []).forEach(walk);
+      };
+      json.forEach(walk);
+      assert.equal(new Set(ids).size, ids.length, `page ${p + 1}: custom ids must be unique`);
+      for (const t of pg) seen.add(t);
+    });
+    for (const t of text.filter(Boolean)) assert.ok(seen.has(t), `every line is on some page: ${t}`);
+    assert.ok(pages.some((pg) => pg[0].endsWith('(continued)')), 'a page starting mid-category repeats its header');
+
+    const file = serverIds.render(g, 0).files[0];
+    const txt = file.attachment.toString('utf8');
+    for (const id of [...chans.keys()].filter((id) => id !== thread.id)) assert.ok(txt.includes(id), `file has channel ${id}`);
+    for (const id of roleMap.keys()) assert.ok(txt.includes(id), `file has role ${id}`);
+    assert.ok(file.name.endsWith('-ids.txt'));
+    // out-of-range pages are clamped
+    assert.equal(serverIds.render(g, 999).components[0].toJSON().components[1].content, `\`\`\`\n${pages.at(-1).join('\n')}\n\`\`\``);
+    assert.equal(serverIds.render(g, Number.NaN).components[0].toJSON().components[1].content, `\`\`\`\n${pages[0].join('\n')}\n\`\`\``);
+    validatePayload('ids big', serverIds.render(g, 1));
   });
   check('color autocomplete', () => {
     assert.equal(colorChoices('#abc')[0].value, '#AABBCC');

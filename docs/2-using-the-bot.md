@@ -8,6 +8,7 @@ Type `/help` in Discord for a clickable overview. Every feature is explained bel
 - [😀 Reaction roles](#-reaction-roles)
 - [📢 Announcements](#-announcements)
 - [👋 Welcome](#-welcome)
+- [🗂️ Server IDs](#️-server-ids)
 
 👉 To see what each panel and message looks like, open [`previews/ui-preview.html`](previews/ui-preview.html) in your browser.
 
@@ -100,6 +101,21 @@ You'll get an instant preview. Then customise:
 | `/welcome settings` | Show everything |
 
 **Placeholders** for title/message/subtitle: `{user}` (mention) · `{name}` (display name) · `{username}` · `{server}` · `{members}` (e.g. 1,284) · `{members_ordinal}` (e.g. 1,284th). Bots are never welcomed.
+
+## 🗂️ Server IDs
+
+```
+/ids
+```
+
+Shows the whole server at a glance, **only to you**:
+
+- **Every category with its channels** in the same order as your sidebar, then **every role** (highest first), each with its **ID**. The server ID is at the top.
+- Channel icons: `#` text · 📢 announcement · 🔊 voice · 🎙️ stage · 💬 forum · 🖼️ media. **🔒** means private (hidden from @everyone).
+- Role marks: 🤖 bot or integration role · 🛡️ has Administrator.
+- Big servers are split into pages: use **◀️ Previous / Next ▶️**, or jump straight to **📁 Channels** or **🎭 Roles**.
+- The attached **`.txt` file** always has the complete list, which is handy for copying IDs.
+- Threads aren't listed. Staff only by default (Manage Server); change who can use it in Server Settings → Integrations → the bot.
 
 ---
 

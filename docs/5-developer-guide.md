@@ -32,6 +32,7 @@ src/
 │   ├── reactionRoles.js  Reaction-role panels, reaction events, /reactionroles
 │   ├── announcements.js  Composer, private preview, publish/edit, right-click apps, /announce
 │   ├── welcome.js        Welcome messages, auto-role, /welcome
+│   ├── serverIds.js      /ids: channel + role map with IDs (pages + .txt file)
 │   └── help.js           /help card
 └── lib/
     ├── store.js          Storage: JSON file (atomic writes + .bak) or MongoDB (waits for the DB, retries saves)
@@ -67,6 +68,7 @@ Custom IDs on buttons, menus and forms start with a prefix that tells `interacti
 | `rr:` | Reaction roles (create form) |
 | `an:` | Announcements (composer, preview buttons, edit form) |
 | `wl:` | Welcome (message form) |
+| `ids:` | `/ids` page buttons (`ids:go:<page>:<button>`) |
 
 ## Data format
 

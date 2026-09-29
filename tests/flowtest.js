@@ -764,6 +764,25 @@ async function step(name, fn) {
     assert.equal(sent.length, before + 1, 'bots are not welcomed');
   });
 
+  console.log('Server IDs');
+  await step('/ids → private map of every channel & role with IDs + .txt file; page buttons update in place', async () => {
+    const r = await run('ids', { type: 'slash', commandName: 'ids' });
+    assert.equal(r.kind, 'reply');
+    assert.ok(r.payload.flags & MessageFlags.Ephemeral, 'only the admin sees it');
+    assert.ok(texts(r.payload).includes('```'), 'list is in a code block');
+    const file = r.payload.files[0];
+    assert.ok(file.name.endsWith('-ids.txt'));
+    const txt = file.attachment.toString('utf8');
+    for (const ch of guild.channels.cache.values()) assert.ok(txt.includes(`${ch.name}`) && txt.includes(ch.id), `file lists #${ch.name}`);
+    for (const role of roles.values()) assert.ok(txt.includes(role.id), `file lists ${role.name}`);
+    assert.ok(txt.includes(`📢 ${C.news.name} — ${C.news.id}`), 'announcement channel icon');
+    assert.ok(texts(r.payload).includes(`attachment://${file.name}`), 'file card references the upload');
+    const u = await run('ids page', { type: 'button', customId: 'ids:go:7:next', fromMessage: true });
+    assert.equal(u.kind, 'update');
+    assert.deepEqual(u.payload.attachments, [], 'old file replaced, not duplicated');
+    assert.equal(u.payload.files.length, 1);
+  });
+
   console.log('Help');
   await step('/help', async () => {
     await run('help', { type: 'slash', commandName: 'help' });

@@ -236,6 +236,12 @@ const welcome = new SlashCommandBuilder()
   )
   .addSubcommand((s) => s.setName('settings').setDescription('Show the current welcome settings'));
 
+const ids = new SlashCommandBuilder()
+  .setName('ids')
+  .setDescription('Every category, channel and role in this server with its ID')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setContexts(InteractionContextType.Guild);
+
 const help = new SlashCommandBuilder()
   .setName('help')
   .setDescription('What this bot can do')
@@ -253,6 +259,6 @@ const editAnnouncement = new ContextMenuCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setContexts(InteractionContextType.Guild);
 
-const builders = [announce, buttonroles, reactionroles, welcome, help, postAsAnnouncement, editAnnouncement];
+const builders = [announce, buttonroles, reactionroles, welcome, ids, help, postAsAnnouncement, editAnnouncement];
 
 module.exports = { builders, commands: builders.map((b) => b.toJSON()) };

@@ -47,6 +47,7 @@ function helpCard(guild, botUser) {
         `${cmd('welcome toggle')} · ${cmd('welcome test')} · ${cmd('welcome settings')}`,
       ].join('\n'),
     ),
+    ui.text(['### 🗂️ Server IDs', `${cmd('ids')} — every category, channel and role with its ID (private, plus a .txt file)`].join('\n')),
   );
   c.addSeparatorComponents(ui.divider());
   c.addTextDisplayComponents(ui.text('-# 💡 My role must sit **above** every role I hand out (Server Settings → Roles).'));

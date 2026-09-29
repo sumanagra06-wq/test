@@ -9,12 +9,14 @@ const buttonRoles = require('./features/buttonRoles');
 const reactionRoles = require('./features/reactionRoles');
 const welcome = require('./features/welcome');
 const help = require('./features/help');
+const serverIds = require('./features/serverIds');
 
 const slashCommands = {
   announce: announcements.command,
   buttonroles: buttonRoles.command,
   reactionroles: reactionRoles.command,
   welcome: welcome.command,
+  ids: serverIds.command,
   help: help.command,
 };
 
@@ -33,6 +35,7 @@ const modalHandlers = {
 const componentHandlers = {
   an: announcements.onButton,
   br: buttonRoles.onComponent,
+  ids: serverIds.onComponent,
 };
 
 function colorChoices(query) {
