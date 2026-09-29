@@ -47,6 +47,15 @@ module.exports = {
   /** If set (Railway/Render/Koyeb do this for web services), a tiny health-check server is started. */
   port: process.env.PORT ? Number(process.env.PORT) : null,
 
+  /**
+   * How parts 2+ of a long announcement show the ping (every part is mentioned, so all parts stay highlighted):
+   * "tag" (default) = small "↳ Part 2 of 3 · @everyone" line · "hidden" = same line, ping behind a tiny spoiler ·
+   * "full" = the same ping line above every part.
+   */
+  extraPingStyle: ['tag', 'hidden', 'full'].includes((process.env.EXTRA_PING_STYLE || '').trim().toLowerCase())
+    ? process.env.EXTRA_PING_STYLE.trim().toLowerCase()
+    : 'tag',
+
   /** Text shown under the bot's name ("Watching ..."). */
   status: process.env.STATUS_TEXT || 'AetherBrackets',
 

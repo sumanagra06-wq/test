@@ -98,16 +98,25 @@ function resolvePing(guild, input) {
  * Turns an announcement into one or more message payloads.
  * @returns {Array<{components, files, flags, allowedMentions}>}
  */
-function renderAnnouncement(a, { preview = false } = {}) {
+function renderAnnouncement(a, { preview = false, extraPing = EXTRA_PING } = {}) {
   const body = [a.body, a.more].map((s) => String(s || '').trim()).filter(Boolean).join('\n\n');
   for (let size = 3000; size >= 1000; size -= 250) {
-    const parts = buildParts(a, body, size, preview);
+    const parts = buildParts(a, body, size, preview, extraPing);
     if (parts.every((p) => ui.textLength(p.components) <= TEXT_BUDGET)) return parts;
   }
-  return buildParts(a, body, 900, preview);
+  return buildParts(a, body, 900, preview, extraPing);
 }
 
-function buildParts(a, body, chunkSize, preview) {
+/**
+ * How the ping appears on parts 2+ of a long announcement (they are always mentioned, so they stay highlighted):
+ *   tag    — a small "↳ Part 2 of 3 · @everyone" line at the top of the part (default)
+ *   hidden — the same small line with the ping tucked behind a tiny spoiler
+ *   full   — the same ping line above the card as part 1
+ * Set with the EXTRA_PING_STYLE environment variable.
+ */
+const EXTRA_PING = config.extraPingStyle;
+
+function buildParts(a, body, chunkSize, preview, extraPing) {
   const card = a.style !== 'plain';
   const color = a.color ?? config.brand.color;
   const chunks = body ? chunkText(body, chunkSize) : [''];
@@ -131,6 +140,9 @@ function buildParts(a, body, chunkSize, preview) {
     if (i === 0) {
       const header = [card ? `-# 📢  ${config.brand.name} · Announcement` : null, a.title ? `# ${a.title}` : null].filter(Boolean).join('\n');
       if (header) blocks.push(ui.text(header));
+    } else if (a.ping && extraPing !== 'full') {
+      const mention = pingText(a.ping);
+      blocks.push(ui.text(`-# ↳ Part ${i + 1} of ${n}${extraPing === 'hidden' ? ` ||${mention}||` : ` · ${mention}`}`));
     }
     if (chunks[i]) blocks.push(ui.text(chunks[i]));
     if (i === n - 1) {
@@ -147,8 +159,8 @@ function buildParts(a, body, chunkSize, preview) {
     if (!blocks.length) blocks.push(ui.text('\u200b'));
 
     const components = [];
-    // every part carries the ping, so a long announcement is highlighted the same way from top to bottom
-    if (a.ping) components.push(ui.text(pingText(a.ping)));
+    // every part mentions the ping target, so a long announcement is highlighted the same way from top to bottom
+    if (a.ping && (i === 0 || extraPing === 'full')) components.push(ui.text(pingText(a.ping)));
     if (card) components.push(ui.fillContainer(ui.container(color), blocks));
     else components.push(...blocks);
 

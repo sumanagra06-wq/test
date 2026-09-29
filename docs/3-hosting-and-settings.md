@@ -22,6 +22,7 @@ On **Railway**, add these under your service → **Variables**. On your PC, copy
 | `BRAND_NAME` | | Name shown on announcements (default `AetherBrackets`) |
 | `BRAND_COLOR` / `BRAND_COLOR_2` | | Accent colours (default `#7C5CFF` / `#22D3EE`) |
 | `STATUS_TEXT` | | “Watching …” status (default `AetherBrackets`) |
+| `EXTRA_PING_STYLE` | | How parts 2+ of a long announcement show the ping: `tag` (default: a small “↳ Part 2 of 3 · @everyone” line), `hidden` (same line, ping behind a tiny spoiler) or `full` (the ping line again above every part). Every part stays highlighted and members are notified once in all three |
 | `PORT` | | If set, a tiny health-check server answers on this port (for hosts that require HTTP) |
 
 ## Where your data is stored

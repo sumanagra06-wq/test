@@ -572,10 +572,11 @@ async function step(name, fn) {
       assert.deepEqual(p.allowedMentions, { parse: ['users', 'everyone'] }, 'edits must keep the mentions');
       assert.equal(isSilent(p), false, 'edits never carry the silent flag');
     }
-    // parts the edit had to add are pinged too, silently
+    // parts the edit had to add are pinged too (small "↳ Part x of y" tag), silently
     assert.ok(sent.length > sentBefore);
     for (const m of sent.slice(sentBefore)) {
-      assert.equal(pingLine(m.payload), '@everyone', 'added part pings');
+      assert.ok(/↳ Part \d+ of \d+ · @everyone/.test(texts(m.payload)), 'added part carries the small ping tag');
+      assert.notEqual(pingLine(m.payload), '@everyone', 'no big ping line on added parts');
       assert.ok(isSilent(m.payload), 'added part is silent');
     }
   });
@@ -592,7 +593,11 @@ async function step(name, fn) {
     longParts = sent.slice(before);
     assert.ok(longParts.length >= 2, 'should be split into several messages');
     longParts.forEach((m, i) => {
-      assert.equal(pingLine(m.payload), '@everyone', `part ${i + 1} must ping`);
+      if (i === 0) assert.equal(pingLine(m.payload), '@everyone', 'part 1 has the big ping line');
+      else {
+        assert.ok(texts(m.payload).includes(`↳ Part ${i + 1} of ${longParts.length} · @everyone`), `part ${i + 1} carries the small ping tag`);
+        assert.notEqual(pingLine(m.payload), '@everyone', `part ${i + 1} has no big ping line`);
+      }
       assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, `part ${i + 1} must be allowed to mention`);
       assert.equal(isSilent(m.payload), i > 0, `part ${i + 1}: only parts 2+ are silent`);
       validatePayload(`long part ${i + 1}`, m.payload, { ephemeralOk: false });

@@ -73,7 +73,7 @@ A composer opens with **Title**, **Message** (4,000 chars), **More text** (anoth
 `🚀 Publish` · `✏️ Edit` · `🎨 Plain/Card style` · `Discard`
 
 - Images and videos appear as a gallery (top or bottom); other files (PDF, ZIP…) as downloadable file cards. Name a file `SPOILER_...` to blur it.
-- Long posts are split into several messages automatically (Discord allows 4,000 characters per message). **Every part shows the ping**, so the whole announcement is highlighted the same way, but members are **notified only once**: parts 2+ are sent as silent messages.
+- Long posts are split into several messages automatically (Discord allows 4,000 characters per message). Parts 2+ mention the same people in a small **“↳ Part 2 of 3 · @everyone”** line, so the whole announcement is highlighted the same way, but members are **notified only once** (parts 2+ are sent as silent messages). Prefer a different look? See `EXTRA_PING_STYLE` in [Hosting & settings](3-hosting-and-settings.md#settings-environment-variables).
 - Markdown works: headings, **bold**, lists, links, `<#channel>` and `<@&role>` mentions. Only the ping you chose notifies people.
 - `crosspost` publishes to servers following your announcement channel.
 - Previews stay open for 30 minutes. Publish before then, or before the bot restarts.

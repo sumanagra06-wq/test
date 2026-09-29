@@ -226,12 +226,26 @@ function panel(style, mode, n, extra = {}) {
       if (fields.ping === 'everyone') assert.deepEqual(parts[0].allowedMentions, { parse: ['users', 'everyone'] });
       parts.forEach((p, i) => {
         // every part pings the same way; parts 2+ are silent (one notification per announcement)
-        if (fields.ping) assert.match(JSON.stringify(p.components[0]), /@everyone|<@&\d+>/, `${name}: part ${i + 1} must carry the ping`);
+        if (fields.ping) {
+          assert.match(JSON.stringify(p.components), /@everyone|<@&\d+>/, `${name}: part ${i + 1} must carry the ping`);
+          if (i > 0) assert.match(JSON.stringify(p.components), /↳ Part \d+ of \d+ · (@everyone|<@&\d+>)/, `${name}: part ${i + 1} small ping tag`);
+        }
         assert.deepEqual(p.allowedMentions, parts[0].allowedMentions, `${name}: part ${i + 1} mentions differ`);
         assert.equal(Boolean(p.flags & MessageFlags.SuppressNotifications), i > 0, `${name}: only parts 2+ are silent`);
       });
       assert.deepEqual(preview.allowedMentions, { parse: [] }, 'previews must never ping');
     });
+  }
+
+  // all three extra-ping styles stay within Discord's limits
+  for (const style of ['tag', 'hidden', 'full']) {
+    for (const [name, fields] of cases.filter(([, f]) => f.ping || f.body?.length > 3000)) {
+      const a = announcements.newSession({ id: '600000000000000002', channelId: '200000000000000001', ...fields, ping: fields.ping ?? 'here', files: fields.files ?? [] });
+      check(`extra ping "${style}" · ${name}`, () => {
+        const parts = announcements.renderAnnouncement(a, { extraPing: style });
+        parts.forEach((p, i) => validatePayload(`${style} ${name} part ${i + 1}`, p, { ephemeralOk: false }));
+      });
+    }
   }
 
   // help + notices
