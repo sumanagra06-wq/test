@@ -19,6 +19,7 @@ const store = require('../lib/store');
 const log = require('../lib/log');
 const ui = require('../lib/ui');
 const { parseColor, isDefaultColorKeyword } = require('../lib/color');
+const autoReact = require('./autoReact');
 const { UserError, truncate, chunkText, download, downloadAttachments, assertBotChannelPerms, formatBytes } = require('../lib/utils');
 
 /**
@@ -432,6 +433,8 @@ async function publish(guild, s, userId) {
   const keys = Object.keys(g.announcements);
   if (keys.length > MAX_RECORDS) for (const k of keys.slice(0, keys.length - MAX_RECORDS)) delete g.announcements[k];
   store.save(guild.id);
+  // auto reactions go on the last part only, so a split announcement still reads as one post
+  autoReact.reactToOwnPost(sent.at(-1));
   return sent[0];
 }
 
@@ -486,6 +489,7 @@ async function repost(interaction, key, ownerId) {
   };
   store.save(guild.id);
   for (const m of old) await m.delete().catch(() => {});
+  autoReact.reactToOwnPost(sent.at(-1));
   const lostFiles = rec.files.length - files.length;
   const body = [
     `The fresh copy is at the bottom of <#${channel.id}> and reads as one post. The old one was removed, and nobody was pinged.`,

@@ -6,6 +6,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 |---|---|
 | 🎛️ **Button roles** | Modern role panels in 3 styles (list cards · button grid · dropdown), 3 modes (toggle · one-at-a-time · add-only), per-role emoji/description/colour, banners, and a private **“My roles”** manager for every member |
 | 😀 **Reaction roles** | Bot panels that list their roles automatically, or reaction roles on **any** existing message. Modes: normal · one-at-a-time · verify |
+| ✨ **Auto reactions** | Pick a channel and up to **20 of your server emojis**: the bot reacts to **every new message** there (members, other bots, webhooks, and its own announcements and welcomes), always in your order |
 | 📢 **Announcements** | Official posts under the bot's name: a big composer (2 × 4,000 characters, auto-split), up to **10 attachments**, ping @everyone/@here/roles, card or plain style, private **preview** before publishing, edit after posting, “Post as Announcement” from any draft message |
 | 👋 **Welcome** | Generated **image banner** (avatar, name, member #) **or** a clean text card — switch any time — plus Rules/Roles buttons, auto-role and custom backgrounds |
 | 🗂️ **Server IDs** | `/ids` lists **every category, channel and role with its ID** in sidebar order (private channels marked 🔒), privately and page by page, plus a `.txt` file with everything |
@@ -31,7 +32,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 | Guide | What's inside |
 |---|---|
 | [1 · Setup guide](docs/1-setup-guide.md) | Create the bot, upload to GitHub, deploy on Railway, invite it, role order, who can use the commands |
-| [2 · Using the bot](docs/2-using-the-bot.md) | Every command for button roles, reaction roles, announcements and welcome |
+| [2 · Using the bot](docs/2-using-the-bot.md) | Every command for button roles, reaction roles, auto reactions, announcements, welcome and server IDs |
 | [3 · Hosting & settings](docs/3-hosting-and-settings.md) | Environment variables, the Railway MongoDB database, Render & other hosts, running on your PC |
 | [4 · Troubleshooting](docs/4-troubleshooting.md) | Fixes for common problems |
 | [5 · Developer guide](docs/5-developer-guide.md) | Code map, how it fits together, tests, regenerating the previews |
@@ -42,6 +43,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 |---|---|---|
 | `/buttonroles` | Manage Roles | `create` · `add` · `remove` · `edit` · `repost` · `delete` · `list` |
 | `/reactionroles` | Manage Roles | `create` · `add` · `remove` · `mode` · `clear` · `list` |
+| `/autoreact` | Manage Server | `set` · `add` · `remove` · `list`: your emojis on every new message in a channel |
 | `/announce` | Manage Server | Compose an official post: preview, ping, up to 10 attachments |
 | `/welcome` | Manage Server | `setup` · `message` · `image` · `buttons` · `autorole` · `toggle` · `test` · `settings` |
 | `/ids` | Manage Server | Every category, channel and role with its ID (private, paged, plus a .txt file) |
@@ -65,7 +67,7 @@ aetherbrackets-bot/
 ├── src/                      ← the bot's code
 │   ├── index.js              ← starts the bot
 │   ├── commands.js · interactions.js · config.js
-│   ├── features/             ← buttonRoles · reactionRoles · announcements · welcome · serverIds · help
+│   ├── features/             ← buttonRoles · reactionRoles · autoReact · announcements · welcome · serverIds · help
 │   └── lib/                  ← storage, UI helpers, banner renderer, utilities
 ├── assets/fonts/             ← fonts for the welcome banner
 ├── tests/                    ← automated checks (npm test)

@@ -21,6 +21,7 @@ const welcome = require('./features/welcome');
 const reactionRoles = require('./features/reactionRoles');
 const buttonRoles = require('./features/buttonRoles');
 const announcements = require('./features/announcements');
+const autoReact = require('./features/autoReact');
 
 if (!config.token) {
   log.error('DISCORD_TOKEN is missing. Add it to your environment variables (Railway → Variables) or a local .env file — see docs/1-setup-guide.md.');
@@ -31,7 +32,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers, // privileged: enable "Server Members Intent" in the Developer Portal
-    GatewayIntentBits.GuildMessages, // message delete events (no message content needed)
+    GatewayIntentBits.GuildMessages, // new messages (auto reactions) + delete events; no message content needed
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildExpressions, // keeps custom emoji up to date
   ],
@@ -90,6 +91,9 @@ client.on(Events.GuildMemberAdd, safe('Welcome', welcome.onMemberAdd));
 client.on(Events.GuildMemberUpdate, safe('Member update', welcome.onMemberUpdate));
 client.on(Events.MessageReactionAdd, safe('Reaction add', reactionRoles.onReactionAdd));
 client.on(Events.MessageReactionRemove, safe('Reaction remove', reactionRoles.onReactionRemove));
+client.on(Events.MessageCreate, safe('Auto reactions', autoReact.onMessage));
+client.on(Events.GuildEmojiDelete, safe('Emoji delete', autoReact.onEmojiDelete));
+client.on(Events.ChannelDelete, safe('Channel delete', autoReact.onChannelDelete));
 
 function onMessageGone(message) {
   if (!message.guildId) return;

@@ -6,6 +6,7 @@ Type `/help` in Discord for a clickable overview. Every feature is explained bel
 
 - [🎛️ Button roles](#️-button-roles)
 - [😀 Reaction roles](#-reaction-roles)
+- [✨ Auto reactions](#-auto-reactions)
 - [📢 Announcements](#-announcements)
 - [👋 Welcome](#-welcome)
 - [🗂️ Server IDs](#️-server-ids)
@@ -63,6 +64,22 @@ More commands:
 - The bot adds the reaction itself and bot panels update their role list automatically.
 - `/reactionroles mode`: **Normal** (unreact removes) · **One at a time** (only one role per message) · **Verify** (reacting gives the role permanently; great for rules).
 - `/reactionroles remove`, `clear`, `list`.
+
+## ✨ Auto reactions
+
+```
+/autoreact set channel:#clips emojis::gg: :hype: 🔥     → every new message in #clips gets these, in this order
+/autoreact add channel:#clips emojis::kekw:            → add more (up to 20 per channel)
+/autoreact remove channel:#clips emoji::hype:          → take one off (leave emoji: empty to turn the channel off)
+/autoreact list                                        → every channel and its emojis
+```
+- In `emojis:`, type **:** and pick your server emojis from Discord's emoji menu, or paste them. Just the name works too (`:gg:`), and so do normal emojis.
+- **Every new message** gets the reactions: from members, other bots and webhooks, and the bot's own announcements and welcome messages. Add `bots:False` to `set` to react to members' messages only.
+- A split announcement only gets them on its **last part**, so it still reads as one post. The bot's role panels are left alone, so their reactions keep their meaning.
+- **Forum and media channels:** the first message of every new post gets the reactions (great for 👍 👎 on suggestions). Replies inside a post don't.
+- Only new messages get reactions. Messages that are already there aren't touched.
+- The bot needs **View Channel**, **Read Message History** and **Add Reactions** in that channel (checked when you run `set`). Discord adds about 4 reactions a second per channel, so a long list takes a moment on each message.
+- Delete one of the emojis from the server and the bot takes it off every list by itself.
 
 ## 📢 Announcements
 

@@ -10,11 +10,13 @@ const reactionRoles = require('./features/reactionRoles');
 const welcome = require('./features/welcome');
 const help = require('./features/help');
 const serverIds = require('./features/serverIds');
+const autoReact = require('./features/autoReact');
 
 const slashCommands = {
   announce: announcements.command,
   buttonroles: buttonRoles.command,
   reactionroles: reactionRoles.command,
+  autoreact: autoReact.command,
   welcome: welcome.command,
   ids: serverIds.command,
   help: help.command,
@@ -60,7 +62,10 @@ async function autocomplete(interaction) {
   let choices = [];
   if (focused.name === 'panel') choices = buttonRoles.panelChoices(guild, focused.value);
   else if (focused.name === 'message') choices = reactionRoles.messageChoices(guild, focused.value);
-  else if (focused.name === 'emoji') choices = reactionRoles.emojiChoices(guild, interaction.options.getString('message'), focused.value);
+  else if (focused.name === 'emoji' && interaction.commandName === 'autoreact') {
+    const channelId = interaction.options.get?.('channel')?.value ?? interaction.options.getChannel?.('channel')?.id;
+    choices = autoReact.emojiChoices(guild, channelId, focused.value);
+  } else if (focused.name === 'emoji') choices = reactionRoles.emojiChoices(guild, interaction.options.getString('message'), focused.value);
   else if (focused.name === 'ping') choices = announcements.pingChoices(guild, focused.value);
   else if (focused.name === 'color') choices = colorChoices(focused.value);
   return interaction.respond(choices.slice(0, 25));

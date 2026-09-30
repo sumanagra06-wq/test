@@ -15,6 +15,7 @@ const log = require('../lib/log');
 const ui = require('../lib/ui');
 const { renderWelcomeCard, prepareBackground } = require('../lib/card');
 const { parseColor, isDefaultColorKeyword, toHex } = require('../lib/color');
+const autoReact = require('./autoReact');
 const {
   UserError,
   fillTemplate,
@@ -128,7 +129,7 @@ async function onMemberAdd(member) {
     return log.warn(`Missing permission to send welcome messages in #${channel.name}`);
   }
   const payload = await buildWelcomePayload(member, cfg, { allowImage: perms.has(PermissionFlagsBits.AttachFiles) });
-  await channel.send(payload);
+  autoReact.reactToOwnPost(await channel.send(payload));
 }
 
 /** Members who had to pass Membership Screening get the auto-role once they accept the rules. */
@@ -327,6 +328,7 @@ async function command(interaction) {
       assertBotChannelPerms(channel, ['ViewChannel', 'SendMessages', 'AttachFiles']);
       const payload = await buildWelcomePayload(interaction.member, cfg, { preview: true });
       const msg = await channel.send(payload);
+      autoReact.reactToOwnPost(msg);
       return interaction.editReply(
         ui.notice('success', 'Test welcome sent', `Posted in ${channel} (without pinging you).`, {
           buttons: [ui.button({ label: 'View message', emoji: '🔗', url: msg.url })],

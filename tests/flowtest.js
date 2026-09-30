@@ -9,7 +9,7 @@ process.env.DATA_DIR = require('node:path').join(require('node:os').tmpdir(), `a
 
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { ChannelType, Collection, MessageFlags, MessageFlagsBitField, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const { ChannelType, Collection, MessageFlags, MessageFlagsBitField, MessageType, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 const { createCanvas } = require('@napi-rs/canvas');
 const { validatePayload, toJSON } = require('./helpers/validate');
 
@@ -19,6 +19,7 @@ const handleInteraction = require('../src/interactions');
 const welcome = require('../src/features/welcome');
 const reactionRoles = require('../src/features/reactionRoles');
 const announcements = require('../src/features/announcements');
+const autoReact = require('../src/features/autoReact');
 
 /* fail on any unexpected error the bot logs */
 const unexpected = [];
@@ -133,6 +134,7 @@ function mockMessage(channel, payload, extra = {}) {
     },
     async react(e) {
       reacts.push(e);
+      (m.reacted ??= []).push(String(e));
       const key = String(e).match(/:(\d+)>$/)?.[1] ?? e;
       m.reactions.cache.set(key, { emoji: { id: null, name: e }, users: { remove: async () => {} }, remove: async () => {} });
     },
@@ -918,6 +920,222 @@ async function step(name, fn) {
   console.log('Help');
   await step('/help', async () => {
     await run('help', { type: 'slash', commandName: 'help' });
+  });
+
+  console.log('Auto reactions');
+  const EMO = {
+    hype: { id: '320000000000000001', name: 'hype', animated: false },
+    gg: { id: '320000000000000002', name: 'gg', animated: false },
+    party: { id: '320000000000000003', name: 'party', animated: true },
+  };
+  for (const e of Object.values(EMO)) guild.emojis.cache.set(e.id, { ...e, available: true, roles: { cache: new Collection() } });
+  guild.emojis.cache.set('320000000000000004', { id: '320000000000000004', name: 'vip', animated: false, available: true, roles: { cache: new Collection([[R.high.id, R.high]]) } });
+  const tag = (e) => `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`;
+  const chat = mockChannel('200000000000000005', 'chat');
+  const someone = { id: '700000000000000010', bot: false };
+  const otherBot = { id: '700000000000000011', bot: true };
+  /** A new message from someone else, the way Discord delivers it. */
+  const incoming = (channel, extra = {}) => {
+    const m = mockMessage(channel, { content: 'hello' }, { author: someone, type: MessageType.Default, ...extra });
+    channel._messages.set(m.id, m);
+    return m;
+  };
+  const reactedWith = (m) => m.reacted ?? [];
+  const autoreact = (name, sub, options, opts) => run(name, { type: 'slash', commandName: 'autoreact', sub, options }, opts);
+
+  await step('/autoreact set → every new message gets the emojis, in order (members, bots, webhooks, joins)', async () => {
+    const r = await autoreact('autoreact set', 'set', { channel: chat, emojis: `${tag(EMO.hype)} :gg: 🔥 🔥` });
+    assert.ok(texts(r.payload).includes('Auto reactions on'));
+    assert.ok(texts(r.payload).includes(`${tag(EMO.hype)} ${tag(EMO.gg)} 🔥`), 'shows the list');
+    assert.deepEqual(g().autoReact[chat.id].emojis.map((e) => e.id ?? e.name), [EMO.hype.id, EMO.gg.id, '🔥']);
+    assert.equal(g().autoReact[chat.id].bots, true, 'bots too by default');
+    const expected = [tag(EMO.hype), tag(EMO.gg), '🔥'];
+    const kinds = [
+      incoming(chat),
+      incoming(chat, { author: otherBot }),
+      incoming(chat, { author: otherBot, webhookId: '900000000000000001' }),
+      incoming(chat, { type: MessageType.UserJoin }),
+      incoming(chat, { type: MessageType.Reply }),
+      incoming(chat, { author: otherBot, type: MessageType.ChatInputCommand }),
+    ];
+    for (const m of kinds) {
+      await autoReact.onMessage(m);
+      assert.deepEqual(reactedWith(m), expected);
+    }
+    const pin = incoming(chat, { type: MessageType.ChannelPinnedMessage });
+    const mine = mockMessage(chat, { content: 'posted by the bot itself' });
+    const elsewhere = incoming(C.other);
+    for (const m of [pin, mine, elsewhere]) await autoReact.onMessage(m);
+    await autoReact.idle();
+    assert.deepEqual([pin, mine, elsewhere].map(reactedWith), [[], [], []], 'pin notices, my own posts (handled separately) and other channels are skipped');
+  });
+
+  await step('bots:false → only members’ messages get reactions', async () => {
+    await autoreact('autoreact bots off', 'set', { channel: chat, emojis: '🔥', bots: false });
+    const human = incoming(chat);
+    const robot = incoming(chat, { author: otherBot });
+    const hook = incoming(chat, { author: { id: '700000000000000013' }, webhookId: '900000000000000002' });
+    for (const m of [human, robot, hook]) await autoReact.onMessage(m);
+    await autoReact.idle();
+    assert.deepEqual([human, robot, hook].map(reactedWith), [['🔥'], [], []]);
+    await autoreact('autoreact bots on', 'set', { channel: chat, emojis: ':hype: :gg:', bots: true });
+  });
+
+  await step('/autoreact add · list · remove (autocomplete) · turn off', async () => {
+    let r = await autoreact('autoreact add', 'add', { channel: chat, emojis: ':party: :gg:' });
+    assert.ok(texts(r.payload).includes('Emojis added') && texts(r.payload).includes('1 of them were already on the list'));
+    assert.deepEqual(g().autoReact[chat.id].emojis.map((e) => e.name), ['hype', 'gg', 'party']);
+    r = await autoreact('autoreact add again', 'add', { channel: chat, emojis: ':gg:' });
+    assert.ok(texts(r.payload).includes('Already on the list'));
+    r = await autoreact('autoreact list', 'list', {});
+    assert.ok(texts(r.payload).includes(`<#${chat.id}>`) && texts(r.payload).includes(tag(EMO.party)) && texts(r.payload).includes('🤖 bots too'));
+    const ac = await run('autoreact ac', { type: 'autocomplete', commandName: 'autoreact', options: { focused: 'emoji', emoji: 'par', channel: chat } });
+    assert.deepEqual(ac.payload, [{ name: ':party: (animated)', value: EMO.party.id }]);
+    r = await autoreact('autoreact remove one', 'remove', { channel: chat, emoji: EMO.party.id });
+    assert.ok(texts(r.payload).includes('Emoji removed'));
+    await autoreact('autoreact remove typed', 'remove', { channel: chat, emoji: ':GG:' });
+    assert.deepEqual(g().autoReact[chat.id].emojis.map((e) => e.name), ['hype']);
+    await autoreact('autoreact remove missing', 'remove', { channel: chat, emoji: '🍕' }, { expectError: true });
+    r = await autoreact('autoreact off', 'remove', { channel: chat });
+    assert.ok(texts(r.payload).includes('Auto reactions off'));
+    assert.equal(g().autoReact[chat.id], undefined);
+    const after = incoming(chat);
+    await autoReact.onMessage(after);
+    assert.deepEqual(reactedWith(after), [], 'nothing once it’s off');
+    r = await autoreact('autoreact list empty', 'list', {});
+    assert.ok(texts(r.payload).includes('No auto reactions yet'));
+  });
+
+  await step('emojis that can’t be used → clear error, nothing saved', async () => {
+    let r = await autoreact('bad names', 'set', { channel: chat, emojis: ':nope: 🔥 <:foreign:399999999999999999>' }, { expectError: true });
+    assert.ok(texts(r.payload).includes('no emoji called `:nope:`') && texts(r.payload).includes('from a server I’m not in'));
+    r = await autoreact('role-limited', 'set', { channel: chat, emojis: ':vip:' }, { expectError: true });
+    assert.ok(texts(r.payload).includes('limited to certain roles'));
+    r = await autoreact('too many', 'set', { channel: chat, emojis: '😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋' }, { expectError: true });
+    assert.ok(texts(r.payload).includes('at most 20'));
+    const realPerms = chat.permissionsFor;
+    chat.permissionsFor = () => ({ has: (flag) => flag !== PermissionFlagsBits.AddReactions });
+    try {
+      r = await autoreact('no permission', 'set', { channel: chat, emojis: '🔥' }, { expectError: true });
+      assert.ok(texts(r.payload).includes('Add Reactions'));
+    } finally {
+      chat.permissionsFor = realPerms;
+    }
+    assert.equal(g().autoReact[chat.id], undefined, 'nothing was saved');
+  });
+
+  await step('announcement in an auto-react channel → reactions only on its last part', async () => {
+    await autoreact('autoreact news', 'set', { channel: C.news, emojis: ':gg: 🔥' });
+    const { payload } = await run('announce ar', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: 'everyone' } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Registration, check-in and prize details for the new season. '.repeat(110);
+    await run('announce ar submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 5', body: long, more: long } });
+    const before = sent.length;
+    await run('publish ar', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    const parts = sent.slice(before);
+    for (const m of parts) await autoReact.onMessage(m); // Discord delivers the bot's own messages too: no double reactions
+    await autoReact.idle();
+    assert.ok(parts.length >= 2);
+    assert.ok(parts.slice(0, -1).every((m) => !reactedWith(m).length), 'no reactions between the parts');
+    assert.deepEqual(reactedWith(parts.at(-1)), [tag(EMO.gg), '🔥'], 'reactions at the end of the whole post');
+    await autoreact('autoreact news off', 'remove', { channel: C.news });
+  });
+
+  await step('welcome messages get the welcome channel’s reactions', async () => {
+    await autoreact('autoreact welcome', 'set', { channel: C.welcome, emojis: '👋 :hype:' });
+    const newbie = mockMember('700000000000000012', [], 0);
+    const before = sent.length;
+    await welcome.onMemberAdd(newbie);
+    await autoReact.idle();
+    assert.equal(sent.length, before + 1);
+    assert.deepEqual(reactedWith(sent.at(-1)), ['👋', tag(EMO.hype)]);
+  });
+
+  await step('emoji deleted from the server → taken off every list', async () => {
+    await autoreact('autoreact chat gg', 'set', { channel: chat, emojis: ':gg:' });
+    // Discord answers "Unknown Emoji" while reacting (deleted, and the delete event was missed)
+    const m = incoming(C.welcome);
+    const realReact = m.react;
+    m.react = async (e) => {
+      if (String(e).includes(EMO.hype.id)) throw Object.assign(new Error('Unknown Emoji'), { code: 10014, status: 400 });
+      return realReact(e);
+    };
+    await autoReact.onMessage(m);
+    assert.deepEqual(reactedWith(m), ['👋'], 'the other emojis still go on');
+    assert.deepEqual(g().autoReact[C.welcome.id].emojis.map((e) => e.name), ['👋'], ':hype: dropped from the list');
+    autoReact.onEmojiDelete({ id: EMO.gg.id, name: 'gg', guild }); // the normal delete event
+    assert.equal(g().autoReact[chat.id], undefined, 'a list left empty is switched off');
+  });
+
+  await step('missing permission while reacting → one warning, no crash', async () => {
+    const warnings = [];
+    const realWarn = log.warn;
+    log.warn = (...a) => warnings.push(a.join(' '));
+    try {
+      for (let k = 0; k < 3; k++) {
+        const m = incoming(C.welcome);
+        m.react = async () => Promise.reject(Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }));
+        await autoReact.onMessage(m);
+      }
+    } finally {
+      log.warn = realWarn;
+    }
+    assert.equal(warnings.length, 1, warnings.join('\n'));
+    assert.match(warnings[0], /can’t react in #welcome.*Add Reactions/);
+  });
+
+  await step('forum channel → the first message of every new post', async () => {
+    const forum = mockChannel('200000000000000006', 'suggestions', ChannelType.GuildForum);
+    const r = await autoreact('autoreact forum', 'set', { channel: forum, emojis: '👍 👎' });
+    assert.ok(texts(r.payload).includes('every new post gets'));
+    const post = mockChannel('200000000000000007', 'Add a 2v2 bracket', ChannelType.PublicThread);
+    post.parentId = forum.id;
+    const starter = incoming(post, { id: post.id });
+    const reply = incoming(post);
+    for (const m of [starter, reply]) await autoReact.onMessage(m);
+    await autoReact.idle();
+    assert.deepEqual(reactedWith(starter), ['👍', '👎']);
+    assert.deepEqual(reactedWith(reply), [], 'replies inside a post are left alone');
+  });
+
+  await step('busy channel → backlog capped with one warning, everything queued still gets its reactions', async () => {
+    const busy = mockChannel('200000000000000008', 'spam');
+    await autoreact('autoreact busy', 'set', { channel: busy, emojis: '🔥' });
+    let open;
+    const gate = new Promise((resolve) => (open = resolve));
+    const warnings = [];
+    const realWarn = log.warn;
+    log.warn = (...a) => warnings.push(a.join(' '));
+    const msgs = [];
+    let queued = 0;
+    try {
+      for (let k = 0; k < autoReact.MAX_BACKLOG + 5; k++) {
+        const m = incoming(busy);
+        const realReact = m.react;
+        m.react = async (e) => {
+          await gate; // Discord is slow: nothing finishes until the gate opens
+          return realReact(e);
+        };
+        msgs.push(m);
+        if (autoReact.onMessage(m)) queued++;
+      }
+      assert.equal(queued, autoReact.MAX_BACKLOG, 'at most MAX_BACKLOG messages wait per channel');
+      assert.equal(warnings.length, 1, 'one warning, not one per message');
+      open();
+      await autoReact.idle();
+    } finally {
+      log.warn = realWarn;
+    }
+    assert.equal(msgs.filter((m) => reactedWith(m).length).length, autoReact.MAX_BACKLOG);
+    const later = incoming(busy);
+    await autoReact.onMessage(later);
+    assert.deepEqual(reactedWith(later), ['🔥'], 'back to normal once caught up');
+  });
+
+  await step('channel deleted → its auto reactions are forgotten', async () => {
+    assert.ok(g().autoReact['200000000000000006']);
+    autoReact.onChannelDelete({ id: '200000000000000006', guild });
+    assert.equal(g().autoReact['200000000000000006'], undefined);
   });
 
   await store.flush();

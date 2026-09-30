@@ -15,6 +15,7 @@ const announcements = require('../src/features/announcements');
 const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
+const autoReact = require('../src/features/autoReact');
 const store = require('../src/lib/store');
 const { toJSON } = require('../tests/helpers/validate');
 
@@ -103,7 +104,7 @@ const guild = {
   channels: { cache: new Collection() },
   emojis: { cache: new Collection() },
 };
-const channelNames = { 1: 'rules', 2: 'get-roles', 3: 'announcements', 4: 'registrations' };
+const channelNames = { 1: 'rules', 2: 'get-roles', 3: 'announcements', 4: 'registrations', 5: 'clips', 6: 'suggestions' };
 
 function panelFrom(style, mode, list, extra = {}) {
   return {
@@ -369,6 +370,18 @@ const avatarUri = dataUri(avatar);
 
   const helpPayload = help.helpCard(guild, { displayAvatarURL: () => 'https://cdn.discordapp.com/icons/bot.png' });
 
+  /* auto reactions — the real /autoreact list card */
+  guild.channels.cache.set('6', { id: '6', name: 'suggestions', type: require('discord.js').ChannelType.GuildForum });
+  const custom = (id, name, animated = false) => ({ id, name, animated });
+  const uni = (name) => ({ id: null, name, animated: false });
+  store.guild(guild.id).autoReact = {
+    3: { emojis: [custom('301000000000000001', 'aether'), custom('301000000000000002', 'hype', true), uni('🔥'), uni('🏆')], bots: true },
+    5: { emojis: [uni('😂'), uni('🔥'), custom('301000000000000003', 'gg')], bots: true },
+    6: { emojis: [uni('👍'), uni('👎')], bots: false },
+  };
+  const autoReactList = autoReact.listCard(guild);
+  const cemoji = '<span class="cemoji"></span>';
+
   /* /ids — a realistic server map */
   const idsGuild = (() => {
     const { ChannelType, PermissionsBitField, PermissionFlagsBits } = require('discord.js');
@@ -429,6 +442,12 @@ const avatarUri = dataUri(avatar);
     ['👤 My roles — personal manager', 'Live view of the member’s roles with Add/Remove buttons that update in place.', message(manager, { img: imgFor({}), ephemeral: true })],
     ['👤 My roles — menu version', 'Used for dropdown panels and panels with 12+ roles: a multi-select that syncs roles in one go.', message(managerSelect, { img: imgFor({}), ephemeral: true })],
     ['Reaction roles', 'Bot-made panels list their emoji → role pairs automatically. You can also attach reaction roles to any existing message.', message(rr, { img: imgFor({}), reactions: [['🔴', 12], ['🔵', 9, true], ['🟢', 11], ['🟡', 7]] })],
+    [
+      '✨ Auto reactions · /autoreact',
+      'Pick a channel and up to 20 of your server emojis: the bot reacts to every new message there, from members, other bots and webhooks, plus its own announcements and welcomes, always in your order. Split announcements only get them on their last part, so they still read as one post.',
+      message(autoReactList, { img: imgFor({}), ephemeral: true }) +
+        message(plain[0], { img: imgFor({}), reactions: [[cemoji, 24], [cemoji, 19], ['🔥', 31], ['🏆', 12]] }),
+    ],
     ['Official announcement · Card style', 'Posted under the bot’s name with a banner, markdown, downloadable files, a footer and a localised timestamp. The ping sits above the card.', message(annParts[0], { img: imgFor({ 'attachment://season3.jpg': seasonBanner }) })],
     ['Official announcement · Plain style', 'Clean text without the box — still with title and role ping.', message(plain[0], { img: imgFor({}) })],
     ['Announcement preview (only you see this)', 'Every announcement is previewed privately first — Publish, Edit, switch style, or Discard.', message(annPreview, { img: imgFor({ 'attachment://season3.jpg': seasonBanner }), ephemeral: true })],

@@ -20,6 +20,7 @@ const announcements = require('../src/features/announcements');
 const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
+const autoReact = require('../src/features/autoReact');
 const { commands } = require('../src/commands');
 const { colorChoices } = require('../src/interactions');
 
@@ -193,12 +194,53 @@ function panel(style, mode, n, extra = {}) {
     assert.equal(utils.safeFileName('🔥🔥.jpg', used), 'file.jpg');
   });
   check('commands', () => {
-    assert.equal(commands.length, 8);
+    assert.equal(commands.length, 9);
     const names = commands.map((c) => c.name);
     assert.ok(names.includes('Post as Announcement') && names.includes('announce'));
     const ids = commands.find((c) => c.name === 'ids');
     assert.equal(ids?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/ids is for staff');
+    const ar = commands.find((c) => c.name === 'autoreact');
+    assert.equal(ar?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/autoreact is for staff');
+    assert.deepEqual(ar.options.map((o) => o.name), ['set', 'add', 'remove', 'list']);
+    const channelTypes = ar.options[0].options.find((o) => o.name === 'channel').channel_types;
+    for (const t of [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum, ChannelType.PublicThread]) assert.ok(channelTypes.includes(t));
   });
+
+  await checkAsync('auto reactions: reading the emoji list', async () => {
+    const emoji = (id, name, extra = {}) => [id, { id, name, animated: false, available: true, roles: { cache: new Collection() }, ...extra }];
+    const myRole = '500000000000000001';
+    const server = {
+      id: guild.id,
+      members: { me: { roles: { cache: new Collection([[myRole, {}]]) } } },
+      client: { emojis: { cache: new Collection([emoji('300000000000000099', 'elsewhere')]) } }, // another server the bot is in
+      emojis: {
+        fetch: async () => {},
+        cache: new Collection([
+          emoji('300000000000000001', 'aether'),
+          emoji('300000000000000002', 'Hype', { animated: true }),
+          emoji('300000000000000003', 'gone', { available: false }),
+          emoji('300000000000000004', 'vip', { roles: { cache: new Collection([['500000000000000009', {}]]) } }),
+          emoji('300000000000000005', 'staff', { roles: { cache: new Collection([[myRole, {}]]) } }),
+        ]),
+      },
+    };
+    const ok = await autoReact.parseEmojiList('<:aether:300000000000000001>, :hype: 🔥🔥 👍🏽 1️⃣ 🇮🇳 ❤ :aether: 300000000000000005 <:elsewhere:300000000000000099> 👨‍👩‍👧', server);
+    assert.deepEqual(ok.problems, []);
+    assert.deepEqual(
+      ok.emojis.map((e) => e.id ?? e.name),
+      ['300000000000000001', '300000000000000002', '🔥', '👍🏽', '1️⃣', '🇮🇳', '❤️', '300000000000000005', '300000000000000099', '👨‍👩‍👧'],
+      'order kept, duplicates dropped, ❤ becomes ❤️',
+    );
+    assert.deepEqual(ok.emojis[1], { id: '300000000000000002', name: 'Hype', animated: true }, 'the server’s own name and animated flag');
+    const bad = await autoReact.parseEmojiList(':nope: <:foreign:399999999999999999> :gone: :vip: hello ? 🔥', server);
+    assert.deepEqual(bad.emojis.map((e) => e.name), ['🔥']);
+    const why = bad.problems.join('\n');
+    assert.equal(bad.problems.length, 6, why);
+    for (const bit of ['no emoji called `:nope:`', '`:foreign:` is from a server I’m not in', '`:gone:` is unavailable', '`:vip:` is limited to certain roles', '`hello` isn’t an emoji', 'Not emojis: `?`']) {
+      assert.ok(why.includes(bit), `missing: ${bit}\n${why}`);
+    }
+  });
+
 
   // /ids — a big server: pages, headers, sidebar order, every ID, Discord limits
   check('server map (/ids) on a big server', () => {
@@ -443,6 +485,24 @@ function panel(style, mode, n, extra = {}) {
       });
     }
   }
+
+  check('auto reactions: list card fits Discord’s limits', () => {
+    const saved = store.guild(guild.id).autoReact;
+    const big = Array.from({ length: 20 }, (_, i) => ({ id: String(310000000000000000n + BigInt(i)), name: `emoji_with_a_long_name_${String(i).padStart(2, '0')}`, animated: i % 2 === 0 }));
+    try {
+      store.guild(guild.id).autoReact = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(210000000000000000n + BigInt(i)), { emojis: big, bots: i % 2 === 0 }]));
+      const card = autoReact.listCard(guild);
+      results.push(['auto reactions list (30 channels × 20)', validatePayload('autoreact list', card)]);
+      assert.match(JSON.stringify(card.components), /…and \d+ more channel/);
+      store.guild(guild.id).autoReact = { '200000000000000001': { emojis: [{ id: null, name: '🔥', animated: false }, big[0]], bots: false } };
+      const small = JSON.stringify(autoReact.listCard(guild).components);
+      assert.ok(small.includes('🔥 <a:emoji_with_a_long_name_00:310000000000000000>') && small.includes('👤 members only'));
+      store.guild(guild.id).autoReact = {};
+      assert.match(JSON.stringify(autoReact.listCard(guild).components), /No auto reactions yet/);
+    } finally {
+      store.guild(guild.id).autoReact = saved;
+    }
+  });
 
   // help + notices
   check('help card', () => results.push(['help card', validatePayload('help', help.helpCard(guild, { displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' }))]));

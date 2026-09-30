@@ -30,6 +30,7 @@ src/
 ├── features/
 │   ├── buttonRoles.js    Button-role panels, the “My roles” manager, /buttonroles
 │   ├── reactionRoles.js  Reaction-role panels, reaction events, /reactionroles
+│   ├── autoReact.js      Auto reactions: /autoreact, reacting to new messages (queued per channel, in order)
 │   ├── announcements.js  Composer, private preview, publish/edit, right-click apps, /announce
 │   ├── welcome.js        Welcome messages, auto-role, /welcome
 │   ├── serverIds.js      /ids: channel + role map with IDs (pages + .txt file)
@@ -42,8 +43,8 @@ src/
     ├── color.js          Colour names (purple, gold…) → hex
     └── log.js            Timestamped console logging
 tests/
-├── selftest.js           77 checks of every message/form against Discord's layout limits
-├── flowtest.js           29 end-to-end flows through the real handlers on a mock Discord server
+├── selftest.js           97 checks of every message/form against Discord's layout limits
+├── flowtest.js           49 end-to-end flows through the real handlers on a mock Discord server
 └── helpers/validate.js   Payload validator shared by the tests and the preview tool
 tools/
 └── preview-html.js       Rebuilds docs/previews/ from the bot's real message payloads
@@ -58,6 +59,8 @@ assets/fonts/             Poppins + Noto Sans (SIL Open Font License)
 | Slash command, button, menu, form, autocomplete | `interactions.js` → the matching feature file |
 | Member joins / finishes Membership Screening | `welcome.js` (welcome message, auto-role) |
 | Reaction added / removed | `reactionRoles.js` |
+| New message | `autoReact.js` (the bot's own announcements and welcomes call `reactToOwnPost()` instead) |
+| Emoji or channel deleted | `autoReact.js` takes it off its lists |
 | Message deleted, role deleted | Each feature updates its saved records (button-role panels are kept, so they can be reposted) |
 
 Custom IDs on buttons, menus and forms start with a prefix that tells `interactions.js` where to send them:
@@ -82,6 +85,7 @@ One record per server:
   reactionRoles: { [messageId]: { channelId, mode, panel?, entries: [...] } },
   buttonPanels:  { [panelId]:   { ...panel settings and roles } },
   announcements: { [firstMessageId]: { ...record used by “Edit Announcement” } },  // re-keyed to the next part if part 1 is deleted
+  autoReact:     { [channelId]: { emojis: [{ id, name, animated }], bots } },    // id: null for normal emojis
 }
 ```
 

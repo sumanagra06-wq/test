@@ -40,6 +40,8 @@ function defaultGuild() {
     buttonPanels: {},
     /** first messageId → announcement record (used for editing) */
     announcements: {},
+    /** channelId → auto reactions: { emojis: [{id, name, animated}], bots: boolean, updatedAt } */
+    autoReact: {},
   };
 }
 
@@ -53,6 +55,7 @@ function withDefaults(data) {
     reactionRoles: g.reactionRoles || {},
     buttonPanels: g.buttonPanels || {},
     announcements: g.announcements || {},
+    autoReact: g.autoReact || {},
   };
 }
 

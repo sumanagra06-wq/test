@@ -8,7 +8,7 @@ function helpCard(guild, botUser) {
   const c = ui.container(config.brand.color);
   c.addSectionComponents(
     new SectionBuilder()
-      .addTextDisplayComponents(ui.text(`# ${config.brand.name} Bot\nRole panels, official announcements and welcomes.`))
+      .addTextDisplayComponents(ui.text(`# ${config.brand.name} Bot\nRole panels, auto reactions, official announcements and welcomes.`))
       .setThumbnailAccessory(ui.thumbnail(botUser.displayAvatarURL({ extension: 'png', size: 256 }), 'Bot avatar')),
   );
   c.addSeparatorComponents(ui.divider(true));
@@ -29,6 +29,13 @@ function helpCard(guild, botUser) {
         `${cmd('reactionroles add')} — emoji → role on a panel or **any** message`,
         `${cmd('reactionroles mode')} — normal · one at a time · verify`,
         `${cmd('reactionroles remove')} · ${cmd('reactionroles clear')} · ${cmd('reactionroles list')}`,
+      ].join('\n'),
+    ),
+    ui.text(
+      [
+        '### ✨ Auto reactions',
+        `${cmd('autoreact set')} — your server emojis on every new message in a channel (up to 20, bots too)`,
+        `${cmd('autoreact add')} · ${cmd('autoreact remove')} · ${cmd('autoreact list')}`,
       ].join('\n'),
     ),
     ui.text(

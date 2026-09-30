@@ -236,6 +236,50 @@ const welcome = new SlashCommandBuilder()
   )
   .addSubcommand((s) => s.setName('settings').setDescription('Show the current welcome settings'));
 
+/** Where auto reactions can be set: chat channels, voice/stage text chat, threads, and forum/media channels (new posts). */
+const REACT_CHANNELS = [
+  ...TEXT_CHANNELS,
+  ChannelType.GuildVoice,
+  ChannelType.GuildStageVoice,
+  ChannelType.GuildForum,
+  ChannelType.GuildMedia,
+  ChannelType.PublicThread,
+  ChannelType.PrivateThread,
+  ChannelType.AnnouncementThread,
+];
+const reactChannelOption = (o) => o.setName('channel').setDescription('Where to react').addChannelTypes(...REACT_CHANNELS).setRequired(true);
+
+const autoreact = new SlashCommandBuilder()
+  .setName('autoreact')
+  .setDescription('React with your emojis to every new message in a channel')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setContexts(InteractionContextType.Guild)
+  .addSubcommand((s) =>
+    s
+      .setName('set')
+      .setDescription('Choose the emojis for a channel (replaces its list)')
+      .addChannelOption(reactChannelOption)
+      .addStringOption((o) =>
+        o.setName('emojis').setDescription('Up to 20, in order. Type : to pick server emojis, e.g. :gg: :hype: 🔥').setRequired(true).setMaxLength(1500),
+      )
+      .addBooleanOption((o) => o.setName('bots').setDescription('Also react to messages from bots and webhooks (default: yes)')),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName('add')
+      .setDescription('Add more emojis to a channel’s list')
+      .addChannelOption(reactChannelOption)
+      .addStringOption((o) => o.setName('emojis').setDescription('Emojis to add. Type : to pick server emojis').setRequired(true).setMaxLength(1500)),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName('remove')
+      .setDescription('Remove one emoji, or turn auto reactions off for a channel')
+      .addChannelOption(reactChannelOption)
+      .addStringOption((o) => o.setName('emoji').setDescription('Emoji to remove (leave empty to turn the channel off)').setAutocomplete(true).setMaxLength(100)),
+  )
+  .addSubcommand((s) => s.setName('list').setDescription('Show every channel with auto reactions'));
+
 const ids = new SlashCommandBuilder()
   .setName('ids')
   .setDescription('Every category, channel and role in this server with its ID')
@@ -259,6 +303,6 @@ const editAnnouncement = new ContextMenuCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setContexts(InteractionContextType.Guild);
 
-const builders = [announce, buttonroles, reactionroles, welcome, ids, help, postAsAnnouncement, editAnnouncement];
+const builders = [announce, buttonroles, reactionroles, autoreact, welcome, ids, help, postAsAnnouncement, editAnnouncement];
 
 module.exports = { builders, commands: builders.map((b) => b.toJSON()) };
