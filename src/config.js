@@ -56,6 +56,15 @@ module.exports = {
     ? process.env.EXTRA_PING_STYLE.trim().toLowerCase()
     : 'tag',
 
+  /**
+   * Who gets notified when a pinged announcement is split into several messages:
+   * "once" (default) = only part 1 notifies; parts 2+ are posted without the ping switched on (so they
+   * read as one post with part 1) and a quick edit then turns the ping on, making them gold too —
+   * edits never notify, but those parts show Discord's small "(edited)" ·
+   * "every" = every part notifies (no "(edited)", but one notification per part).
+   */
+  extraPingNotify: (process.env.EXTRA_PING_NOTIFY || '').trim().toLowerCase() === 'every' ? 'every' : 'once',
+
   /** Text shown under the bot's name ("Watching ..."). */
   status: process.env.STATUS_TEXT || 'AetherBrackets',
 

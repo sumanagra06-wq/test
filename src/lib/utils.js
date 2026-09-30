@@ -49,10 +49,22 @@ function fillTemplate(template, vars) {
 }
 
 /**
- * Splits long text into chunks ≤ max characters, preferring paragraph → line → word
- * boundaries and keeping ``` code blocks balanced across chunks.
+ * Splits long text into chunks ≤ max characters at the most natural place it can find:
+ *   1. right before a heading (# / ## / ###), so a new section starts the next chunk
+ *   2. between paragraphs, then between lines — but never right after an intro line that ends
+ *      with ":" (e.g. "The following are prohibited:" stays with the list below it)
+ *   3. between words, and only as a last resort mid-word
+ * ``` code blocks stay balanced across chunks. It never produces more chunks than a plain
+ * paragraph → line → word split would.
  */
 function chunkText(input, max) {
+  const plain = splitText(input, max, false);
+  if (plain.length < 2) return plain;
+  const nice = splitText(input, max, true);
+  return nice.length <= plain.length ? nice : plain;
+}
+
+function splitText(input, max, nice) {
   const chunks = [];
   let rest = String(input ?? '').trim();
   let reopenFence = false;
@@ -64,10 +76,7 @@ function chunkText(input, max) {
       break;
     }
     const limit = max - 4; // leave room to close a code fence
-    let cut = rest.lastIndexOf('\n\n', limit);
-    if (cut < limit * 0.5) cut = rest.lastIndexOf('\n', limit);
-    if (cut < limit * 0.5) cut = rest.lastIndexOf(' ', limit);
-    if (cut < limit * 0.5) cut = limit;
+    const cut = findCut(rest, limit, nice);
     let piece = rest.slice(0, cut).trimEnd();
     rest = rest.slice(cut).trimStart();
     if ((piece.match(/```/g) || []).length % 2 === 1) {
@@ -77,6 +86,37 @@ function chunkText(input, max) {
     chunks.push(piece);
   }
   return chunks.filter((c) => c.trim().length);
+}
+
+const insideCodeBlock = (text) => (text.match(/```/g) || []).length % 2 === 1;
+
+/** True when the text ends with an intro line such as "The following are prohibited:" or "**Rules:**". */
+function endsWithLeadIn(text) {
+  const lastLine = text.trimEnd().split('\n').pop() ?? '';
+  return /[:：]$/.test(lastLine.replace(/[\s*_~`|]+$/, ''));
+}
+
+/** Where to cut `text` so the first piece is ≤ limit characters (see chunkText). */
+function findCut(text, limit, nice) {
+  const min = limit * 0.5;
+  if (nice) {
+    // the last heading in the final ~40% of the window (headings inside code blocks don't count)
+    let heading = -1;
+    for (const m of text.slice(0, limit).matchAll(/\n(?=#{1,3} \S)/g)) {
+      if (m.index >= limit * 0.6 && !insideCodeBlock(text.slice(0, m.index))) heading = m.index;
+    }
+    if (heading > 0) return heading;
+    for (const sep of ['\n\n', '\n']) {
+      let cut = text.lastIndexOf(sep, limit);
+      while (cut >= min && endsWithLeadIn(text.slice(0, cut))) cut = text.lastIndexOf(sep, cut - 1);
+      if (cut >= min) return cut;
+    }
+  }
+  let cut = text.lastIndexOf('\n\n', limit);
+  if (cut < min) cut = text.lastIndexOf('\n', limit);
+  if (cut < min) cut = text.lastIndexOf(' ', limit);
+  if (cut < min) cut = limit;
+  return cut;
 }
 
 function shortId(len = 6) {

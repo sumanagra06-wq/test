@@ -98,13 +98,29 @@ function resolvePing(guild, input) {
  * Turns an announcement into one or more message payloads.
  * @returns {Array<{components, files, flags, allowedMentions}>}
  */
-function renderAnnouncement(a, { preview = false, extraPing = EXTRA_PING } = {}) {
+function renderAnnouncement(a, options) {
+  return renderParts(a, options).map((p) => p.payload);
+}
+
+/**
+ * Like renderAnnouncement, but each part also says how to post it:
+ *   payload — the finished message
+ *   quiet   — null, or a version to send first that notifies nobody (no ping switched on, no files).
+ *             Sending that and then editing it into `payload` (lightUp) makes the part gold without a
+ *             notification: edits never notify. Unlike Discord's "silent" flag, this keeps the part
+ *             grouped under part 1 (a silent message after a normal one always gets its own name header).
+ * @param {object} [o]
+ * @param {'once'|'every'|'none'} [o.notify] who gets notified: once = part 1 only (default, see
+ *   EXTRA_PING_NOTIFY) · every = every part · none = nobody (edits and reposts)
+ * @returns {Array<{payload: object, quiet: object|null}>}
+ */
+function renderParts(a, { preview = false, extraPing = EXTRA_PING, notify = EXTRA_NOTIFY } = {}) {
   const body = [a.body, a.more].map((s) => String(s || '').trim()).filter(Boolean).join('\n\n');
   for (let size = 3000; size >= 1000; size -= 250) {
-    const parts = buildParts(a, body, size, preview, extraPing);
-    if (parts.every((p) => ui.textLength(p.components) <= TEXT_BUDGET)) return parts;
+    const parts = buildParts(a, body, size, { preview, extraPing, notify });
+    if (parts.every((p) => ui.textLength(p.payload.components) <= TEXT_BUDGET)) return parts;
   }
-  return buildParts(a, body, 900, preview, extraPing);
+  return buildParts(a, body, 900, { preview, extraPing, notify });
 }
 
 /**
@@ -115,8 +131,10 @@ function renderAnnouncement(a, { preview = false, extraPing = EXTRA_PING } = {})
  * Set with the EXTRA_PING_STYLE environment variable.
  */
 const EXTRA_PING = config.extraPingStyle;
+/** once (default) | every — see renderParts and EXTRA_PING_NOTIFY in config.js. */
+const EXTRA_NOTIFY = config.extraPingNotify;
 
-function buildParts(a, body, chunkSize, preview, extraPing) {
+function buildParts(a, body, chunkSize, { preview, extraPing, notify }) {
   const card = a.style !== 'plain';
   const color = a.color ?? config.brand.color;
   const chunks = body ? chunkText(body, chunkSize) : [''];
@@ -125,14 +143,18 @@ function buildParts(a, body, chunkSize, preview, extraPing) {
   const docs = a.files.filter((f) => f.kind === 'file');
   const mediaPart = a.imagePosition === 'bottom' ? n - 1 : 0;
   const ts = Math.floor((a.publishedAt ?? Date.now()) / 1000);
+  const mentionsUsers = /<@!?\d{15,21}>/.test([a.title, body, a.footer].join('\n'));
   const parts = [];
 
   for (let i = 0; i < n; i++) {
     const blocks = [];
     const files = [];
+    const fileBlocks = new Set(); // blocks that show uploaded files (left out of the quiet version)
     const addMedia = () => {
       if (!media.length || i !== mediaPart) return;
-      blocks.push(ui.gallery(media.slice(0, 10).map((f) => ({ url: `attachment://${f.name}`, spoiler: f.spoiler }))));
+      const gallery = ui.gallery(media.slice(0, 10).map((f) => ({ url: `attachment://${f.name}`, spoiler: f.spoiler })));
+      blocks.push(gallery);
+      fileBlocks.add(gallery);
       files.push(...media.slice(0, 10));
     };
 
@@ -151,6 +173,7 @@ function buildParts(a, body, chunkSize, preview, extraPing) {
         const fb = new FileBuilder().setURL(`attachment://${f.name}`);
         if (f.spoiler) fb.setSpoiler(true);
         blocks.push(fb);
+        fileBlocks.add(fb);
         files.push(f);
       }
       const footer = [a.footer, card ? `<t:${ts}:f>` : null].filter(Boolean).join(' · ');
@@ -158,19 +181,34 @@ function buildParts(a, body, chunkSize, preview, extraPing) {
     }
     if (!blocks.length) blocks.push(ui.text('\u200b'));
 
-    const components = [];
-    // every part mentions the ping target, so a long announcement is highlighted the same way from top to bottom
-    if (a.ping && (i === 0 || extraPing === 'full')) components.push(ui.text(pingText(a.ping)));
-    if (card) components.push(ui.fillContainer(ui.container(color), blocks));
-    else components.push(...blocks);
+    const compose = (list) => {
+      const components = [];
+      // every part mentions the ping target, so a long announcement is highlighted the same way from top to bottom
+      if (a.ping && (i === 0 || extraPing === 'full')) components.push(ui.text(pingText(a.ping)));
+      if (card) components.push(ui.fillContainer(ui.container(color), list.length ? list : [ui.text('\u200b')]));
+      else components.push(...(list.length ? list : [ui.text('\u200b')]));
+      return components;
+    };
 
-    parts.push({
-      components,
+    const payload = {
+      components: compose(blocks),
       files: files.map((f) => new AttachmentBuilder(f.buffer, { name: f.name })),
-      // parts 2+ are sent "silently": same mentions and highlight, but no second push/desktop notification
-      flags: i > 0 && !preview ? ui.V2 | MessageFlags.SuppressNotifications : ui.V2,
+      flags: ui.V2, // never Discord's "silent" flag: it would split the announcement under a second name header
       allowedMentions: preview ? { parse: [] } : allowedMentionsFor(a.ping),
-    });
+    };
+
+    // parts that must not notify on arrival go out "quiet" first and are then edited into `payload`
+    const quietNeeded = !preview && (notify === 'none' ? Boolean(a.ping) || mentionsUsers : notify === 'once' && i > 0 && Boolean(a.ping));
+    const quiet = quietNeeded
+      ? {
+          components: compose(blocks.filter((b) => !fileBlocks.has(b))), // files ride along with the edit
+          flags: ui.V2,
+          // "once": people @mentioned by name in this part are still notified; the @everyone/@here/role ping isn't
+          allowedMentions: notify === 'none' ? { parse: [] } : allowedMentionsFor(null),
+        }
+      : null;
+
+    parts.push({ payload, quiet });
   }
   return parts;
 }
@@ -181,7 +219,9 @@ function renderPreview(guild, session, { skipFiles = false } = {}) {
   const first = parts[0];
   const info = [
     `Posting to <#${s.channelId}>`,
-    s.ping ? `pings **${pingLabel(guild, s.ping)}**${parts.length > 1 ? ' in every part (notified once)' : ''}` : null,
+    s.ping
+      ? `pings **${pingLabel(guild, s.ping)}**${parts.length > 1 ? (EXTRA_NOTIFY === 'every' ? ' in every part (each part notifies)' : ' in every part (notified once)') : ''}`
+      : null,
     parts.length > 1 ? `**${parts.length} messages** (showing part 1)` : null,
     s.crosspost ? 'auto-publish to followers' : null,
   ]
@@ -340,18 +380,35 @@ function getChannel(guild, id) {
 
 /* ───────────────────────── publishing ───────────────────────── */
 
-async function publish(guild, s, userId) {
-  const channel = getChannel(guild, s.channelId);
-  assertBotChannelPerms(channel, requiredPerms(guild, s));
-  s.publishedAt = Date.now();
-  const parts = renderAnnouncement(s);
+/**
+ * Switches the ping on for a part that was sent quiet (and adds its files): Discord re-reads the mentions
+ * when a message is edited, so the part turns gold — and edits never notify anyone.
+ */
+function lightUp(message, payload) {
+  return message.edit({ ...payload, flags: ui.V2, ...(payload.files.length ? { attachments: [] } : {}) });
+}
+
+/** Posts the parts in order (see renderParts). If anything fails, whatever was posted is removed again. */
+async function sendParts(channel, parts) {
   const sent = [];
   try {
-    for (const p of parts) sent.push(await channel.send(p));
+    for (const part of parts) {
+      const message = await channel.send(part.quiet ?? part.payload);
+      sent.push(message);
+      if (part.quiet) await lightUp(message, part.payload);
+    }
   } catch (err) {
     for (const m of sent) await m.delete().catch(() => {}); // never leave half an announcement behind
     throw err;
   }
+  return sent;
+}
+
+async function publish(guild, s, userId) {
+  const channel = getChannel(guild, s.channelId);
+  assertBotChannelPerms(channel, requiredPerms(guild, s));
+  s.publishedAt = Date.now();
+  const sent = await sendParts(channel, renderParts(s));
   if (s.crosspost && channel.type === ChannelType.GuildAnnouncement) {
     for (const m of sent) await m.crosspost().catch((err) => log.warn('Crosspost failed:', err.message));
   }
@@ -392,6 +449,53 @@ async function fetchFresh(channel, messageId) {
     if (err?.code === 10008) return null;
     throw err;
   }
+}
+
+/** Sent with Discord's "silent" flag (how older versions of the bot posted parts 2+). */
+const isSilentMessage = (message) => Boolean(message?.flags?.has?.(MessageFlags.SuppressNotifications));
+
+/**
+ * 🔁 Repost (offered after editing an announcement that older versions of the bot posted with silent parts):
+ * posts a fresh copy at the bottom of the channel — every part highlighted, nobody notified — and removes the old one.
+ */
+async function repost(interaction, key, ownerId) {
+  if (ownerId !== interaction.user.id) throw new UserError('Only the person who edited the announcement can use this button.');
+  const guild = interaction.guild;
+  const g = store.guild(guild.id);
+  const rec = g.announcements[key];
+  if (!rec) throw new UserError('That announcement is no longer tracked — it may have been deleted or reposted already.', 'Nothing to repost');
+  await ui.deferUpdate(interaction);
+  const channel = getChannel(guild, rec.channelId);
+  const old = (await Promise.all(rec.messageIds.map((mid) => fetchFresh(channel, mid)))).filter(Boolean);
+  if (!old.length) {
+    delete g.announcements[key];
+    store.save(guild.id);
+    throw new UserError('Every message of this announcement was deleted, so there’s nothing to repost. Post it again with `/announce`.', 'Announcement deleted');
+  }
+  const files = await carryOverFiles(rec, old);
+  const a = { ...rec, files };
+  assertBotChannelPerms(channel, requiredPerms(guild, a));
+  const sent = await sendParts(channel, renderParts(a, { notify: 'none' }));
+  // move the record to the new messages first, so the old messages' delete events don't touch it
+  delete g.announcements[key];
+  g.announcements[sent[0].id] = {
+    ...rec,
+    messageIds: sent.map((m) => m.id),
+    files: files.map((f) => ({ name: f.name, kind: f.kind, spoiler: f.spoiler })),
+    editedAt: Date.now(),
+  };
+  store.save(guild.id);
+  for (const m of old) await m.delete().catch(() => {});
+  const lostFiles = rec.files.length - files.length;
+  const body = [
+    `The fresh copy is at the bottom of <#${channel.id}> and reads as one post. The old one was removed, and nobody was pinged.`,
+    lostFiles > 0 ? `-# ${lostFiles} attachment(s) were on a deleted message and couldn’t be kept — add them again with **Edit Announcement**.` : null,
+  ];
+  return interaction.editReply(
+    ui.notice('success', 'Announcement reposted', body.filter(Boolean).join('\n'), {
+      buttons: [ui.button({ label: 'Open announcement', emoji: '🔗', url: sent[0].url })],
+    }),
+  );
 }
 
 /** Re-downloads the files already on an announcement so they survive an edit. */
@@ -491,15 +595,18 @@ async function onModal(interaction) {
       files,
     };
     assertHasContent(a);
-    const parts = renderAnnouncement(a);
+    const parts = renderParts(a, { notify: 'none' }); // an edit never notifies anyone — not even for added parts
     let appended = 0;
     try {
       for (let i = 0; i < parts.length; i++) {
+        const { payload, quiet } = parts[i];
         // keeps the ping's mentions so every part stays highlighted — edits never notify anyone
-        if (live[i]) await live[i].edit({ ...parts[i], flags: ui.V2, attachments: [] });
+        if (live[i]) await live[i].edit({ ...payload, flags: ui.V2, attachments: [] });
         else {
-          live.push(await channel.send(parts[i])); // extra parts go out silently (see buildParts)
+          const message = await channel.send(quiet ?? payload);
+          live.push(message);
           appended++;
+          if (quiet) await lightUp(message, payload);
         }
       }
     } catch (err) {
@@ -507,6 +614,9 @@ async function onModal(interaction) {
       throw err;
     }
     for (let i = parts.length; i < live.length; i++) await live[i].delete().catch(() => {});
+    // posted by an older version of the bot: parts 2+ carry Discord's "silent" flag, which can't be removed
+    // and makes Discord repeat the bot's name above them → offer a clean repost
+    const legacySilent = live.slice(1, parts.length).some(isSilentMessage);
     Object.assign(rec, {
       title: a.title,
       body: a.body,
@@ -526,12 +636,16 @@ async function onModal(interaction) {
       messages[0] ? null : '-# The first message had been deleted, so the announcement now starts at its next message.',
       lostFiles > 0 ? `-# ${lostFiles} attachment(s) were on a deleted message and couldn’t be kept — add them again with **Edit Announcement**.` : null,
       appended ? `-# The longer text needed ${appended} extra message(s), added at the end of the channel.` : null,
+      legacySilent
+        ? '**Why does the bot’s name show up again above part 2?**\n' +
+          'This announcement was posted by an older version of the bot, which sent parts 2+ as Discord “silent” messages — ' +
+          'and Discord always gives a silent message its own name header. Discord doesn’t let bots change that on a message that’s already posted.\n' +
+          `-# **🔁 Repost** posts a fresh copy at the bottom of <#${channel.id}> that reads as one post (every part still highlighted), then removes this one. Nobody gets pinged.`
+        : null,
     ].filter(Boolean);
-    return interaction.editReply(
-      ui.notice('success', 'Announcement updated', notes.join('\n') || null, {
-        buttons: [ui.button({ label: 'Open announcement', emoji: '🔗', url: live[0].url })],
-      }),
-    );
+    const buttons = [ui.button({ label: 'Open announcement', emoji: '🔗', url: live[0].url })];
+    if (legacySilent) buttons.push(ui.button({ id: `an:repost:${rec.messageIds[0]}:${interaction.user.id}`, label: 'Repost', emoji: '🔁', style: ButtonStyle.Primary }));
+    return interaction.editReply(ui.notice('success', 'Announcement updated', notes.join('\n') || null, { buttons }));
   }
 
   const s = sessions.get(id);
@@ -581,7 +695,8 @@ async function onModal(interaction) {
 }
 
 async function onButton(interaction) {
-  const [, action, id] = interaction.customId.split(':');
+  const [, action, id, extra] = interaction.customId.split(':');
+  if (action === 'repost') return repost(interaction, id, extra);
   const s = sessions.get(id);
   if (!s) {
     return interaction.update({ ...ui.notice('warn', 'Draft expired', 'Drafts last 30 minutes — please start again.'), attachments: [] });
@@ -659,6 +774,7 @@ module.exports = {
   pingChoices,
   onMessageDelete,
   renderAnnouncement,
+  renderParts,
   renderPreview,
   newSession,
   CHANNEL_TYPES,

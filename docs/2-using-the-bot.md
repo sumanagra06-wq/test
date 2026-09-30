@@ -74,14 +74,16 @@ A composer opens with **Title**, **Message** (4,000 chars), **More text** (anoth
 `🚀 Publish` · `✏️ Edit` · `🎨 Plain/Card style` · `Discard`
 
 - Images and videos appear as a gallery (top or bottom); other files (PDF, ZIP…) as downloadable file cards. Name a file `SPOILER_...` to blur it.
-- Long posts are split into several messages automatically (Discord allows 4,000 characters per message). Parts 2+ mention the same people in a small **“↳ Part 2 of 3 · @everyone”** line, so the whole announcement is highlighted the same way, but members are **notified only once** (parts 2+ are sent as silent messages). Prefer a different look? See `EXTRA_PING_STYLE` in [Hosting & settings](3-hosting-and-settings.md#settings-environment-variables).
+- Long posts are split into several messages automatically (Discord allows 4,000 characters per message). Where it can, the bot splits right before a heading, and it never leaves an intro line such as “The following are prohibited:” at the end of a part. The parts read as **one post**: the bot’s name appears only once, above part 1.
+- Parts 2+ mention the same people in a small **“↳ Part 2 of 3 · @everyone”** line, so the whole announcement is highlighted the same way, but members are **notified only once**: parts 2+ arrive with the ping switched off, then the bot switches it on with a quick edit (edits never notify anyone). Because of that edit, Discord shows a small grey **(edited)** under parts 2+. Prefer a different look, or a notification for every part? See `EXTRA_PING_STYLE` and `EXTRA_PING_NOTIFY` in [Hosting & settings](3-hosting-and-settings.md#settings-environment-variables).
 - Markdown works: headings, **bold**, lists, links, `<#channel>` and `<@&role>` mentions. Only the ping you chose notifies people.
 - `crosspost` publishes to servers following your announcement channel.
 - Previews stay open for 30 minutes. Publish before then, or before the bot restarts.
 
 **Right-click Apps (on any message → Apps):**
 - **Post as Announcement** turns a draft message (with its attachments) into an official post. Write your draft normally in a staff channel, with emoji and mention autocomplete, then pick the channel and ping in the form.
-- **Edit Announcement** edits a bot announcement later (text and optionally replace attachments). Right-click **any** part of it. Edits never ping anyone again, and every part keeps its ping highlight. If the text grows, the extra part is added (silently) at the end of the channel. If someone deleted the first part, the announcement simply continues from its next part.
+- **Edit Announcement** edits a bot announcement later (text and optionally replace attachments). Right-click **any** part of it. Edits never ping anyone again, and every part keeps its ping highlight. If the text grows, the extra part is added at the end of the channel (highlighted too, nobody is pinged). If someone deleted the first part, the announcement simply continues from its next part.
+  - Announcements posted by an older version of the bot may show the bot’s name again above part 2 (with a 🔕 bell). Discord can’t change that on a posted message, so after you submit an edit on one, the bot offers **🔁 Repost**: a fresh copy that reads as one post goes to the bottom of the channel, the old one is removed, and nobody is pinged.
 
 ## 👋 Welcome
 

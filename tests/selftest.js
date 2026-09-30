@@ -126,6 +126,63 @@ function panel(style, mode, n, extra = {}) {
       assert.equal((c.match(/```/g) || []).length % 2, 0, 'unbalanced fence');
     }
   });
+  check('chunkText starts the next part at a heading', () => {
+    const para = (k, j) => `Rule ${k}.${j}: members must follow this at all times, in every channel and voice room.`;
+    const section = (k) => [`## ${k}️⃣ Section ${k}`, ...[1, 2, 3, 4, 5].map((j) => para(k, j))].join('\n\n');
+    const rules = Array.from({ length: 8 }, (_, k) => section(k + 1)).join('\n\n');
+    const chunks = utils.chunkText(rules, 3000);
+    assert.equal(chunks.length, 2);
+    assert.match(chunks[1], /^## \d️⃣ Section \d$/m, 'part 2 starts with a section heading');
+    assert.ok(/^## /.test(chunks[1]), `part 2 should begin at the heading, got: ${chunks[1].slice(0, 40)}`);
+  });
+  check('chunkText keeps an intro line ending with ":" together with its list', () => {
+    for (const intro of ['The following are prohibited:', '**The following are prohibited:**']) {
+      const doc = [
+        'Members are expected to treat each other with respect and follow the Terms of Service. '.repeat(21).trim(),
+        'Report the issue through support with enough information for the team to investigate.',
+        intro,
+        ['• Self-bots or unauthorized automation.', '• Automated abuse or spam.', ...Array(30).fill('• Attempts to bypass platform restrictions.')].join('\n'),
+      ].join('\n\n');
+      const chunks = utils.chunkText(doc, 3000);
+      assert.equal(chunks.length, 2);
+      assert.ok(!/:\**\s*$/.test(chunks[0]), `part 1 must not end with the intro line: …${chunks[0].slice(-40)}`);
+      assert.ok(chunks[1].startsWith(intro), `part 2 should start with the intro line, got: ${chunks[1].slice(0, 40)}`);
+    }
+  });
+  check('chunkText never adds a message just for a nicer break', () => {
+    const paras = (n, tag) => Array.from({ length: n }, (_, j) => `${tag} paragraph ${j}: plenty of detail about brackets, check-ins and prizes here.`).join('\n\n');
+    const doc = `${paras(24, 'Intro')}\n\n## Heading in the middle\n${paras(48, 'Body')}`;
+    assert.equal(utils.chunkText(doc, 3000).length, 2, 'cutting at the heading would need 3 messages — the plain split (2) wins');
+  });
+  check('chunkText never loses text (random documents)', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const norm = (s) => s.replace(/```/g, '').replace(/\s+/g, '');
+    for (let doc = 0; doc < 150; doc++) {
+      const blocks = [];
+      while (blocks.join('\n\n').length < 2500 + rnd() * 6000) {
+        blocks.push(
+          pick([
+            () => `${'#'.repeat(1 + Math.floor(rnd() * 3))} Heading ${blocks.length}`,
+            () => 'A sentence about the tournament rules and schedule. '.repeat(1 + Math.floor(rnd() * 12)).trim(),
+            () => `The following apply:\n${Array.from({ length: 2 + Math.floor(rnd() * 12) }, (_, i) => `- item ${i} with some words`).join('\n')}`,
+            () => `\`\`\`\n${'# not a heading\nline of code\n'.repeat(1 + Math.floor(rnd() * 40))}\`\`\``,
+            () => `**Note:**\n${'word '.repeat(Math.floor(rnd() * 300))}`,
+          ])(),
+        );
+      }
+      const text = blocks.join(pick(['\n\n', '\n']));
+      for (const max of [1000, 1750, 3000]) {
+        const chunks = utils.chunkText(text, max);
+        for (const c of chunks) {
+          assert.ok(c.length <= max, `chunk of ${c.length} > ${max}`);
+          assert.equal((c.match(/```/g) || []).length % 2, 0, 'unbalanced fence');
+        }
+        assert.equal(norm(chunks.join('\n')), norm(text), `text changed (doc ${doc}, max ${max})`);
+      }
+    }
+  });
   check('fillTemplate / ordinal / safeFileName', () => {
     assert.equal(utils.fillTemplate('Hi {User} #{members} {unknown}', { user: '<@1>', members: '5' }), 'Hi <@1> #5 {unknown}');
     assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111, 1284].map(utils.ordinal), ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th', '1,284th']);
@@ -278,6 +335,19 @@ function panel(style, mode, n, extra = {}) {
 
   // announcements
   const fakeFile = (name, kind, size = 1000) => ({ name, kind, buffer: Buffer.alloc(size), size, spoiler: false });
+  /** Every Text Display's content, in order (walks containers). */
+  const textBlocks = (components) => {
+    const out = [];
+    const walk = (node) => {
+      const j = typeof node?.toJSON === 'function' ? node.toJSON() : node;
+      if (Array.isArray(j)) return j.forEach(walk);
+      if (!j || typeof j !== 'object') return;
+      if (j.type === ComponentType.TextDisplay) out.push(j.content);
+      for (const v of Object.values(j)) if (v && typeof v === 'object') walk(v);
+    };
+    walk(components);
+    return out;
+  };
   const mediaFiles = Array.from({ length: 6 }, (_, i) => fakeFile(`shot-${i}.png`, 'image'));
   const docFiles = [fakeFile('rules.pdf', 'file'), fakeFile('bracket.xlsx', 'file'), fakeFile('trailer.mp4', 'video'), fakeFile('a'.repeat(60) + '.zip', 'file')];
   const longText = 'Lorem ipsum dolor sit amet, **consectetur** adipiscing elit. '.repeat(66); // ~4000
@@ -291,7 +361,8 @@ function panel(style, mode, n, extra = {}) {
     ['code block long', { body: `\`\`\`\n${'x = 1\n'.repeat(900)}\`\`\`` }],
   ];
   for (const [name, fields] of cases) {
-    const a = announcements.newSession({ id: '600000000000000001', channelId: '200000000000000001', ...fields, files: fields.files ?? [] });
+    // publishedAt is fixed like publish() does, so renders compared below can't straddle a second (card footer timestamp)
+    const a = announcements.newSession({ id: '600000000000000001', channelId: '200000000000000001', publishedAt: Date.now(), ...fields, files: fields.files ?? [] });
     check(`announcement ${name}`, () => {
       const parts = announcements.renderAnnouncement(a);
       const allFiles = new Set();
@@ -304,18 +375,63 @@ function panel(style, mode, n, extra = {}) {
       const v = validatePayload(`${name} preview`, preview);
       results.push([`announcement: ${name} (${parts.length} msg)`, v]);
       if (fields.ping === 'everyone') assert.deepEqual(parts[0].allowedMentions, { parse: ['users', 'everyone'] });
+      const posted = announcements.renderParts(a);
+      assert.equal(posted.length, parts.length);
       parts.forEach((p, i) => {
-        // every part pings the same way; parts 2+ are silent (one notification per announcement)
+        // every part pings the same way (so the whole announcement is gold)
         if (fields.ping) {
           assert.match(JSON.stringify(p.components), /@everyone|<@&\d+>/, `${name}: part ${i + 1} must carry the ping`);
           if (i > 0) assert.match(JSON.stringify(p.components), /↳ Part \d+ of \d+ · (@everyone|<@&\d+>)/, `${name}: part ${i + 1} small ping tag`);
         }
         assert.deepEqual(p.allowedMentions, parts[0].allowedMentions, `${name}: part ${i + 1} mentions differ`);
-        assert.equal(Boolean(p.flags & MessageFlags.SuppressNotifications), i > 0, `${name}: only parts 2+ are silent`);
+        // never Discord's "silent" flag: a silent message after a normal one always gets its own name header
+        assert.equal(Boolean(p.flags & MessageFlags.SuppressNotifications), false, `${name}: part ${i + 1} must not be silent`);
+        assert.deepEqual(posted[i].payload, p);
+        const { quiet } = posted[i];
+        if (!fields.ping || i === 0) {
+          assert.equal(quiet, null, `${name}: part ${i + 1} is posted as it is`);
+          return;
+        }
+        // parts 2+ first arrive "quiet" (ping not switched on → nobody notified), then an edit turns the ping on
+        validatePayload(`${name} part ${i + 1} (quiet)`, quiet, { ephemeralOk: false });
+        assert.deepEqual(quiet.allowedMentions, { parse: ['users'] }, `${name}: quiet part ${i + 1} must not ping`);
+        assert.equal(Boolean(quiet.flags & MessageFlags.SuppressNotifications), false, `${name}: quiet part ${i + 1} must not be silent`);
+        assert.ok(!quiet.files?.length, `${name}: quiet part ${i + 1} uploads nothing (files come with the edit)`);
+        const q = JSON.stringify(quiet.components);
+        assert.ok(!/"type":(12|13)[,}]/.test(q), `${name}: quiet part ${i + 1} must not show files it doesn't have`);
+        assert.match(q, /↳ Part \d+ of \d+ · (@everyone|<@&\d+>)/, `${name}: quiet part ${i + 1} already shows the tag (nothing jumps)`);
+        assert.deepEqual(textBlocks(quiet.components), textBlocks(p.components), `${name}: quiet part ${i + 1} has exactly the final text`);
       });
       assert.deepEqual(preview.allowedMentions, { parse: [] }, 'previews must never ping');
     });
   }
+
+  // who gets notified: once (default) · every · none (edits and reposts)
+  check('announcement notify modes', () => {
+    const base = { id: '600000000000000003', channelId: '200000000000000001', title: 'Rules', body: longText, more: longText };
+    const pinged = announcements.newSession({ ...base, ping: 'everyone', files: [...mediaFiles, ...docFiles] });
+    const every = announcements.renderParts(pinged, { notify: 'every' });
+    assert.ok(every.length >= 2, 'long enough to split');
+    assert.ok(every.every((p) => p.quiet === null), 'every: each part is posted as it is (each one notifies)');
+    const none = announcements.renderParts(pinged, { notify: 'none' });
+    none.forEach((p, i) => {
+      assert.ok(p.quiet, `none: part ${i + 1} arrives quiet`);
+      assert.deepEqual(p.quiet.allowedMentions, { parse: [] }, `none: part ${i + 1} notifies nobody — not even @mentioned users`);
+      assert.deepEqual(p.payload.allowedMentions, { parse: ['users', 'everyone'] }, `none: part ${i + 1} is still gold after the edit`);
+      assert.ok(!p.quiet.files?.length && !/"type":(12|13)[,}]/.test(JSON.stringify(p.quiet.components)), `none: part ${i + 1} files come with the edit`);
+      validatePayload(`none part ${i + 1} (quiet)`, p.quiet, { ephemeralOk: false });
+    });
+    // nothing to switch on → posted as it is
+    assert.ok(announcements.renderParts(announcements.newSession({ ...base, files: [] }), { notify: 'none' }).every((p) => p.quiet === null));
+    // an @user mention with no ping: a repost/edit must not notify them again, a normal post does
+    const withUser = announcements.newSession({ ...base, body: `GG <@123456789012345678>! ${longText}`, files: [] });
+    assert.ok(announcements.renderParts(withUser, { notify: 'none' }).every((p) => p.quiet?.allowedMentions.parse.length === 0));
+    assert.ok(announcements.renderParts(withUser).every((p) => p.quiet === null && p.payload.allowedMentions.parse.includes('users')));
+    // the preview never pings, in any mode
+    for (const notify of ['once', 'every', 'none']) {
+      assert.ok(announcements.renderParts(pinged, { preview: true, notify }).every((p) => p.quiet === null && p.payload.allowedMentions.parse.length === 0));
+    }
+  });
 
   // all three extra-ping styles stay within Discord's limits
   for (const style of ['tag', 'hidden', 'full']) {

@@ -9,7 +9,7 @@ process.env.DATA_DIR = require('node:path').join(require('node:os').tmpdir(), `a
 
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { ChannelType, Collection, MessageFlags, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const { ChannelType, Collection, MessageFlags, MessageFlagsBitField, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 const { createCanvas } = require('@napi-rs/canvas');
 const { validatePayload, toJSON } = require('./helpers/validate');
 
@@ -78,6 +78,8 @@ const botTop = role('410000000000000099', 'AetherBot', 80);
 const sent = [];
 const edits = [];
 const reacts = [];
+/** every send/edit in order: ['send' | 'edit', messageId] */
+const events = [];
 
 const guild = {
   id: GUILD_ID,
@@ -112,13 +114,17 @@ function mockMessage(channel, payload, extra = {}) {
     content: '',
     url: `https://discord.com/channels/${GUILD_ID}/${channel.id}/${id}`,
     payload,
+    sentPayload: payload, // what arrived first (payload changes on edits)
+    flags: new MessageFlagsBitField(payload?.flags ?? 0), // like Discord: an edit can't remove "silent"
     attachments: attachmentsFrom(payload?.files),
     reactions: { cache: new Collection(), removeAll: async () => m.reactions.cache.clear() },
     async edit(p) {
       if (m.goneOnDiscord) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
       if (p.attachments && p.attachments.length === 0) m.attachments = attachmentsFrom(p.files);
+      else if (p.files?.length) throw new Error('test: files on an edit without attachments: [] would pile up');
       m.payload = p;
       edits.push(p);
+      events.push(['edit', id]);
       return m;
     },
     async delete() {
@@ -150,6 +156,7 @@ function mockChannel(id, name, type = ChannelType.GuildText) {
       const m = mockMessage(ch, payload);
       ch._messages.set(m.id, m);
       sent.push(m);
+      events.push(['send', m.id]);
       return m;
     },
     messages: {
@@ -562,45 +569,69 @@ async function step(name, fn) {
     const long = 'A long paragraph about the new season. '.repeat(100);
     const editsBefore = edits.length;
     const sentBefore = sent.length;
-    await run('edit ctx submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 3 is HERE', body: long, more: long, footer: '' } });
+    const r = await run('edit ctx submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 3 is HERE', body: long, more: long, footer: '' } });
     const rec = g().announcements[announcement.id];
     assert.ok(rec.messageIds.length >= 2, 'long edit should span multiple messages');
     assert.equal(rec.files.length, 2);
     // edits keep the ping + its mentions (so the gold highlight stays; edits never notify)
+    assert.ok(edits.length > editsBefore);
     for (const p of edits.slice(editsBefore)) {
-      assert.equal(pingLine(p), '@everyone', 'edited part keeps the ping');
       assert.deepEqual(p.allowedMentions, { parse: ['users', 'everyone'] }, 'edits must keep the mentions');
       assert.equal(isSilent(p), false, 'edits never carry the silent flag');
     }
-    // parts the edit had to add are pinged too (small "↳ Part x of y" tag), silently
-    assert.ok(sent.length > sentBefore);
-    for (const m of sent.slice(sentBefore)) {
+    assert.equal(pingLine(announcement.payload), '@everyone', 'part 1 keeps the ping');
+    // parts the edit had to add arrive quiet (nobody is notified), then an edit switches their ping on
+    const added = sent.slice(sentBefore);
+    assert.ok(added.length > 0);
+    for (const m of added) {
+      assert.deepEqual(m.sentPayload.allowedMentions, { parse: [] }, 'an added part notifies nobody');
+      assert.equal(isSilent(m.sentPayload), false, 'added part is not silent (that would give it its own name header)');
+      assert.notEqual(m.payload, m.sentPayload, 'added part was lit up by an edit');
+      assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, 'added part is gold');
       assert.ok(/↳ Part \d+ of \d+ · @everyone/.test(texts(m.payload)), 'added part carries the small ping tag');
       assert.notEqual(pingLine(m.payload), '@everyone', 'no big ping line on added parts');
-      assert.ok(isSilent(m.payload), 'added part is silent');
     }
+    // the PDF moved to the new last part: it arrives with the edit, not with the quiet send
+    const last = added.at(-1);
+    assert.ok(!last.sentPayload.files?.length, 'quiet send uploads nothing');
+    assert.deepEqual(last.payload.files.map((f) => f.name), ['Rules_v2.pdf']);
+    assert.equal(last.attachments.size, 1);
+    assert.ok(!texts(r.payload).includes('an:repost'), 'no repost offer for a normal announcement');
   });
 
   let longParts;
-  await step('long announcement → every part pings (parts 2+ silently)', async () => {
+  await step('long announcement → reads as one post: every part gold, notified once, never silent', async () => {
     const { payload } = await run('announce long', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: 'everyone' } });
     const sid = payload.custom_id.split(':')[2];
     const long = 'Brackets, rules and prizes for the new season. '.repeat(120);
     const preview = await run('announce long submit', { type: 'modal', customId: payload.custom_id, fields: { title: 'Season 4', body: long, more: long, footer: '' } });
     assert.ok(texts(preview.payload).includes('in every part (notified once)'), 'preview explains the pings');
     const before = sent.length;
+    const eventsBefore = events.length;
     await run('publish long', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
     longParts = sent.slice(before);
     assert.ok(longParts.length >= 2, 'should be split into several messages');
+    // part 1 · part 2 (quiet) → lit up · part 3 (quiet) → lit up …
+    const order = longParts.flatMap((m, i) => (i === 0 ? [['send', m.id]] : [['send', m.id], ['edit', m.id]]));
+    assert.deepEqual(events.slice(eventsBefore), order, 'each part is lit up before the next one is posted');
     longParts.forEach((m, i) => {
-      if (i === 0) assert.equal(pingLine(m.payload), '@everyone', 'part 1 has the big ping line');
-      else {
-        assert.ok(texts(m.payload).includes(`↳ Part ${i + 1} of ${longParts.length} · @everyone`), `part ${i + 1} carries the small ping tag`);
+      // Discord's "silent" flag would make Discord repeat the bot's name above parts 2+ → never used
+      assert.equal(isSilent(m.sentPayload), false, `part ${i + 1} is not silent`);
+      assert.equal(m.flags.has(MessageFlags.SuppressNotifications), false, `part ${i + 1} flags`);
+      if (i === 0) {
+        assert.equal(pingLine(m.payload), '@everyone', 'part 1 has the big ping line');
+        assert.deepEqual(m.sentPayload.allowedMentions, { parse: ['users', 'everyone'] }, 'part 1 notifies');
+        assert.equal(m.payload, m.sentPayload, 'part 1 is never edited');
+      } else {
+        assert.deepEqual(m.sentPayload.allowedMentions, { parse: ['users'] }, `part ${i + 1} arrives with the ping not switched on`);
+        assert.ok(texts(m.sentPayload).includes(`↳ Part ${i + 1} of ${longParts.length} · @everyone`), `part ${i + 1} shows its tag from the start`);
+        assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, `part ${i + 1} is gold after the edit`);
+        assert.equal(m.payload.flags, MessageFlags.IsComponentsV2, `part ${i + 1}: the edit only sets the V2 flag`);
         assert.notEqual(pingLine(m.payload), '@everyone', `part ${i + 1} has no big ping line`);
+        assert.equal(texts(m.payload), texts(m.sentPayload), `part ${i + 1} looks the same before and after the edit`);
       }
-      assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, `part ${i + 1} must be allowed to mention`);
-      assert.equal(isSilent(m.payload), i > 0, `part ${i + 1}: only parts 2+ are silent`);
       validatePayload(`long part ${i + 1}`, m.payload, { ephemeralOk: false });
+      validatePayload(`long part ${i + 1} (as sent)`, m.sentPayload, { ephemeralOk: false });
     });
   });
 
@@ -648,6 +679,107 @@ async function step(name, fn) {
     const r = await run('edit gone submit', { type: 'modal', customId: ctx.payload.custom_id, fields: { body: 'Edited' } }, { expectError: true });
     assert.ok(texts(r.payload).includes('Announcement deleted'));
     assert.equal(g().announcements[msg.id], undefined);
+  });
+
+  await step('long announcement with files at the bottom → the files arrive with the edit', async () => {
+    const { payload } = await run('announce files', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: R.valorant.id, images: 'bottom', style: 'plain' } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Map pool, check-in times and prize rules for every division. '.repeat(110);
+    await run('announce files submit', {
+      type: 'modal',
+      customId: payload.custom_id,
+      fields: { title: 'Rules', body: long, more: long, footer: '', files: [att('bracket.png'), att('Rules.pdf', 'application/pdf')] },
+    });
+    const before = sent.length;
+    await run('publish files', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    const parts = sent.slice(before);
+    const last = parts.at(-1);
+    assert.ok(parts.length >= 2);
+    assert.ok(parts.every((m) => !m.sentPayload.files?.length), 'nothing is uploaded with a quiet send');
+    assert.ok(!/"type":(12|13)[,}]/.test(texts(last.sentPayload)), 'the quiet send shows no file blocks');
+    assert.deepEqual(last.payload.files.map((f) => f.name).sort(), ['Rules.pdf', 'bracket.png'], 'the edit uploads both files');
+    assert.deepEqual(last.payload.attachments, [], 'the edit sets the attachments (no leftovers)');
+    assert.equal(last.attachments.size, 2, 'the last part ends up with both files');
+    for (const m of parts) assert.deepEqual(m.payload.allowedMentions, { parse: ['users'], roles: [R.valorant.id] });
+    assert.equal(g().announcements[parts[0].id].files.length, 2);
+  });
+
+  await step('a part that can’t be lit up → the whole announcement is rolled back', async () => {
+    const { payload } = await run('announce fail', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: 'here' } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Tournament format and tie-break rules explained in detail. '.repeat(110);
+    await run('announce fail submit', { type: 'modal', customId: payload.custom_id, fields: { body: long, more: long } });
+    const realSend = C.news.send;
+    C.news.send = async (p) => {
+      const m = await realSend(p);
+      if (p.allowedMentions?.parse?.length === 1) m.edit = async () => Promise.reject(Object.assign(new Error('Missing Access'), { code: 50001, status: 403 }));
+      return m;
+    };
+    const before = sent.length;
+    const recs = Object.keys(g().announcements).length;
+    const i = interaction({ type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    try {
+      await handleInteraction(i);
+    } finally {
+      C.news.send = realSend;
+    }
+    assert.equal(unexpected.length, 1, 'the failure is logged once');
+    unexpected.length = 0;
+    const [, reply] = i.log.at(-1);
+    assert.ok(texts(reply).includes('View Channel'), 'tells the admin what went wrong');
+    const posted = sent.slice(before);
+    assert.ok(posted.length >= 2, 'part 1 and part 2 were posted');
+    assert.ok(posted.every((m) => m.deleted), 'no half announcement is left behind');
+    assert.equal(Object.keys(g().announcements).length, recs, 'nothing recorded');
+  });
+
+  await step('announcement from an older version (silent parts) → Edit offers 🔁 Repost → one clean post, nobody pinged', async () => {
+    const { payload } = await run('announce legacy', { type: 'slash', commandName: 'announce', options: { channel: C.news, ping: 'everyone' } });
+    const sid = payload.custom_id.split(':')[2];
+    const long = 'Code of conduct, reporting and appeals for every member. '.repeat(120);
+    await run('announce legacy submit', {
+      type: 'modal',
+      customId: payload.custom_id,
+      fields: { title: 'Server Rules', body: long, more: long, footer: '— Staff', files: [att('rules.png'), att('Rules.pdf', 'application/pdf')] },
+    });
+    let before = sent.length;
+    await run('publish legacy', { type: 'button', customId: `an:pub:${sid}`, fromMessage: true });
+    const old = sent.slice(before);
+    assert.ok(old.length >= 2);
+    // what the older bot did: parts 2+ were sent with Discord's silent flag (can't be removed afterwards)
+    for (const m of old.slice(1)) m.flags = new MessageFlagsBitField(MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications);
+
+    const ctx = await run('legacy edit ctx', { type: 'context', commandName: 'Edit Announcement', targetMessage: old[1] });
+    const r = await run('legacy edit submit', { type: 'modal', customId: ctx.payload.custom_id, fields: { title: 'Server Rules', body: long, more: long, footer: '— Staff' } });
+    const repostId = `an:repost:${old[0].id}:${admin.id}`;
+    assert.ok(texts(r.payload).includes(repostId), 'offers the Repost button');
+    assert.ok(texts(r.payload).includes('silent'), 'explains why the name shows up again');
+
+    await run('repost by someone else', { type: 'button', customId: repostId, member: staff, fromMessage: true }, { expectError: true });
+    assert.ok(old.every((m) => !m.deleted), 'someone else can’t use it');
+
+    before = sent.length;
+    const done = await run('repost', { type: 'button', customId: repostId, fromMessage: true });
+    assert.ok(texts(done.payload).includes('Announcement reposted'));
+    const fresh = sent.slice(before);
+    assert.equal(fresh.length, old.length, 'same parts');
+    assert.ok(old.every((m) => m.deleted), 'old copy removed');
+    fresh.forEach((m, i) => {
+      assert.deepEqual(m.sentPayload.allowedMentions, { parse: [] }, `part ${i + 1} notifies nobody`);
+      assert.equal(isSilent(m.sentPayload), false, `part ${i + 1} is not silent`);
+      assert.deepEqual(m.payload.allowedMentions, { parse: ['users', 'everyone'] }, `part ${i + 1} is gold`);
+      validatePayload(`repost part ${i + 1}`, m.payload, { ephemeralOk: false });
+    });
+    assert.equal(pingLine(fresh[0].payload), '@everyone', 'part 1 keeps the big ping line');
+    assert.ok(texts(fresh.at(-1).payload).includes('— Staff'), 'same content');
+    const rec = g().announcements[fresh[0].id];
+    assert.deepEqual(rec?.messageIds, fresh.map((m) => m.id), 'the record follows the new messages');
+    assert.equal(g().announcements[old[0].id], undefined, 'old record gone');
+    assert.equal(rec.files.length, 2, 'files carried over');
+    assert.equal(fresh.reduce((n, m) => n + m.attachments.size, 0), 2, 'both files re-uploaded');
+    for (const m of old) announcements.onMessageDelete(GUILD_ID, m.id); // the old messages' delete events
+    assert.deepEqual(g().announcements[fresh[0].id]?.messageIds, fresh.map((m) => m.id), 'delete events of the old copy change nothing');
+    await run('repost again', { type: 'button', customId: repostId, fromMessage: true }, { expectError: true });
   });
 
   await step('Discord 503 while opening a form → one calm warning, no error', async () => {

@@ -66,9 +66,11 @@ Custom IDs on buttons, menus and forms start with a prefix that tells `interacti
 |---|---|
 | `br:` | Button roles (panel buttons, “My roles” manager, create/edit forms) |
 | `rr:` | Reaction roles (create form) |
-| `an:` | Announcements (composer, preview buttons, edit form) |
+| `an:` | Announcements (composer, preview buttons, edit form, `an:repost:<record>:<user>` button) |
 | `wl:` | Welcome (message form) |
 | `ids:` | `/ids` page buttons (`ids:go:<page>:<button>`) |
+
+**Long announcements.** `renderParts()` splits the text with `chunkText()` (preferring a cut right before a heading, and never right after a line ending in “:”), then returns each part as `{ payload, quiet }`. A part that must not notify on arrival (parts 2+ of a pinged post, or every part of an edit or repost) is sent as `quiet` first: the same text, but with the ping not switched on and without files. It is then edited into `payload`. Discord re-reads mentions when a message is edited, so the part turns gold without notifying anyone. Discord’s `SUPPRESS_NOTIFICATIONS` (“silent”) flag is deliberately **not** used: the client always shows a new name header when a silent message follows a normal one.
 
 ## Data format
 
