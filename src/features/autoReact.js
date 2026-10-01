@@ -20,7 +20,7 @@ const { UserError, truncate, emojiKey, emojiText, stripVariation, assertBotChann
 const MAX_EMOJIS = 20; // Discord's limit of different reactions on one message
 const MAX_BACKLOG = 50; // per channel: beyond this, new messages are skipped until the bot has caught up
 const WARN_EVERY = 60 * 60 * 1000; // the same problem is logged at most once an hour
-const PICK_TIP = 'Tip: type **:** in the box and pick your server emojis from the menu, or paste them.';
+const PICK_TIP = 'Tip: leave **emojis** empty to pick from a list of your server’s emojis (animated ones too).';
 
 /** Chat messages, replies, other bots' command replies, joins and boosts. Not pins, thread notices and the like. */
 const REACTABLE = new Set([
@@ -166,6 +166,31 @@ function listCard(guild) {
   return { components: [card], flags: ui.V2, allowedMentions: { parse: [] } };
 }
 
+/**
+ * Saves a channel's emoji list (after checking the limit and the bot's permissions there)
+ * and returns the confirmation card. Used by typed emojis and by the clickable list.
+ */
+function saveChannel(guild, channel, list, bots, { title = 'Auto reactions on', note = null } = {}) {
+  if (!list.length) throw new UserError(`Add at least one emoji. ${PICK_TIP}`, 'No emojis');
+  if (list.length > MAX_EMOJIS) {
+    throw new UserError(`A message can have at most ${MAX_EMOJIS} different reactions. That would be ${list.length}.`, 'Too many emojis');
+  }
+  const perms = ['ViewChannel', 'ReadMessageHistory', 'AddReactions'];
+  if (list.some((e) => e.id && !guild.emojis.cache.has(e.id))) perms.push('UseExternalEmojis');
+  assertBotChannelPerms(channel, perms);
+  const g = store.guild(guild.id);
+  g.autoReact[channel.id] = { emojis: list.map(({ id, name, animated }) => ({ id: id ?? null, name, animated: Boolean(animated) })), bots, updatedAt: Date.now() };
+  store.save(guild.id);
+  const lines = [
+    `${channel}: every new ${POST_CHANNELS.has(channel.type) ? 'post' : 'message'} gets`,
+    `## ${listText(list)}`,
+    `-# In this order · ${bots ? '🤖 bot messages too' : '👤 members’ messages only'} · messages that are already there aren’t touched`,
+    note ? `-# ${note}` : null,
+    list.length > 8 ? `-# Discord adds about 4 reactions a second, so ${list.length} emojis take a few seconds per message.` : null,
+  ];
+  return ui.notice('success', title, lines.filter(Boolean).join('\n'));
+}
+
 async function command(interaction) {
   const guild = interaction.guild;
   const g = store.guild(guild.id);
@@ -173,37 +198,28 @@ async function command(interaction) {
 
   if (sub === 'set' || sub === 'add') {
     const channel = interaction.options.getChannel('channel', true);
-    const { emojis, problems } = await parseEmojiList(interaction.options.getString('emojis', true), guild);
+    const current = g.autoReact[channel.id];
+    const typed = interaction.options.getString('emojis');
+    if (!typed) {
+      // no emojis typed → a clickable list of the server's emojis (animated ones work without Nitro)
+      assertBotChannelPerms(channel, ['ViewChannel', 'ReadMessageHistory', 'AddReactions']);
+      const bots = interaction.options.getBoolean('bots') ?? current?.bots ?? true;
+      return require('./reactPicker').openForChannel(interaction, channel, { chosen: current?.emojis ?? [], bots });
+    }
+    const { emojis, problems } = await parseEmojiList(typed, guild);
     if (problems.length) {
       const shown = problems.slice(0, 8).map((p) => `• ${p}`);
       if (problems.length > 8) shown.push(`• …and ${problems.length - 8} more`);
       throw new UserError(`${shown.join('\n')}\n-# ${PICK_TIP}`, 'Some of those can’t be used');
     }
     if (!emojis.length) throw new UserError(`Add at least one emoji. ${PICK_TIP}`, 'No emojis');
-    const current = g.autoReact[channel.id];
     const before = sub === 'add' && current ? current.emojis : [];
     const known = new Set(before.map(emojiKey));
     const added = emojis.filter((e) => !known.has(emojiKey(e)));
     if (!added.length) return ui.respond(interaction, ui.notice('info', 'Already on the list', `${channel} already reacts with ${listText(before)}`));
-    const list = [...before, ...added];
-    if (list.length > MAX_EMOJIS) {
-      throw new UserError(`A message can have at most ${MAX_EMOJIS} different reactions. That would be ${list.length}.`, 'Too many emojis');
-    }
-    const perms = ['ViewChannel', 'ReadMessageHistory', 'AddReactions'];
-    if (list.some((e) => e.id && !guild.emojis.cache.has(e.id))) perms.push('UseExternalEmojis');
-    assertBotChannelPerms(channel, perms);
-
     const bots = interaction.options.getBoolean('bots') ?? current?.bots ?? true;
-    g.autoReact[channel.id] = { emojis: list, bots, updatedAt: Date.now() };
-    store.save(guild.id);
-    const lines = [
-      `${channel}: every new ${POST_CHANNELS.has(channel.type) ? 'post' : 'message'} gets`,
-      `## ${listText(list)}`,
-      `-# In this order · ${bots ? '🤖 bot messages too' : '👤 members’ messages only'} · messages that are already there aren’t touched`,
-      sub === 'add' && added.length < emojis.length ? `-# ${emojis.length - added.length} of them were already on the list.` : null,
-      list.length > 8 ? `-# Discord adds about 4 reactions a second, so ${list.length} emojis take a few seconds per message.` : null,
-    ];
-    return ui.respond(interaction, ui.notice('success', sub === 'add' ? 'Emojis added' : 'Auto reactions on', lines.filter(Boolean).join('\n')));
+    const note = sub === 'add' && added.length < emojis.length ? `${emojis.length - added.length} of them were already on the list.` : null;
+    return ui.respond(interaction, saveChannel(guild, channel, [...before, ...added], bots, { title: sub === 'add' ? 'Emojis added' : 'Auto reactions on', note }));
   }
 
   if (sub === 'remove') {
@@ -371,6 +387,9 @@ async function idle() {
 
 module.exports = {
   command,
+  saveChannel,
+  customEmojiProblem,
+  POST_CHANNELS,
   emojiChoices,
   listCard,
   parseEmojiList,

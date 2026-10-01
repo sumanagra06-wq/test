@@ -260,7 +260,7 @@ const autoreact = new SlashCommandBuilder()
       .setDescription('Choose the emojis for a channel (replaces its list)')
       .addChannelOption(reactChannelOption)
       .addStringOption((o) =>
-        o.setName('emojis').setDescription('Up to 20, in order. Type : to pick server emojis, e.g. :gg: :hype: 🔥').setRequired(true).setMaxLength(1500),
+        o.setName('emojis').setDescription('Leave empty to pick from a list of your server emojis · or type them, e.g. :gg: 🔥').setMaxLength(1500),
       )
       .addBooleanOption((o) => o.setName('bots').setDescription('Also react to messages from bots and webhooks (default: yes)')),
   )
@@ -280,6 +280,29 @@ const autoreact = new SlashCommandBuilder()
   )
   .addSubcommand((s) => s.setName('list').setDescription('Show every channel with auto reactions'));
 
+/** Channels a message can be in (for /react). */
+const MESSAGE_CHANNELS = [
+  ...TEXT_CHANNELS,
+  ChannelType.GuildVoice,
+  ChannelType.GuildStageVoice,
+  ChannelType.PublicThread,
+  ChannelType.PrivateThread,
+  ChannelType.AnnouncementThread,
+];
+
+const react = new SlashCommandBuilder()
+  .setName('react')
+  .setDescription('Make the bot react to any message, picking emojis from a list')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setContexts(InteractionContextType.Guild)
+  .addStringOption((o) =>
+    o.setName('message').setDescription('Message ID or link (right-click the message → Copy Message ID)').setRequired(true).setMaxLength(200),
+  )
+  .addStringOption((o) => o.setName('emojis').setDescription('Leave empty to pick from a list · or type them, e.g. :gg: 🔥').setMaxLength(1500))
+  .addChannelOption((o) =>
+    o.setName('channel').setDescription('Where the message is (leave empty and I’ll search every channel)').addChannelTypes(...MESSAGE_CHANNELS),
+  );
+
 const ids = new SlashCommandBuilder()
   .setName('ids')
   .setDescription('Every category, channel and role in this server with its ID')
@@ -297,12 +320,18 @@ const postAsAnnouncement = new ContextMenuCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setContexts(InteractionContextType.Guild);
 
+const reactAsBot = new ContextMenuCommandBuilder()
+  .setName('React as Bot')
+  .setType(ApplicationCommandType.Message)
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setContexts(InteractionContextType.Guild);
+
 const editAnnouncement = new ContextMenuCommandBuilder()
   .setName('Edit Announcement')
   .setType(ApplicationCommandType.Message)
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setContexts(InteractionContextType.Guild);
 
-const builders = [announce, buttonroles, reactionroles, autoreact, welcome, ids, help, postAsAnnouncement, editAnnouncement];
+const builders = [announce, buttonroles, reactionroles, autoreact, react, welcome, ids, help, postAsAnnouncement, editAnnouncement, reactAsBot];
 
 module.exports = { builders, commands: builders.map((b) => b.toJSON()) };

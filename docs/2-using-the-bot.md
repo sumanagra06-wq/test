@@ -7,6 +7,7 @@ Type `/help` in Discord for a clickable overview. Every feature is explained bel
 - [🎛️ Button roles](#️-button-roles)
 - [😀 Reaction roles](#-reaction-roles)
 - [✨ Auto reactions](#-auto-reactions)
+- [😀 React to any message](#-react-to-any-message)
 - [📢 Announcements](#-announcements)
 - [👋 Welcome](#-welcome)
 - [🗂️ Server IDs](#️-server-ids)
@@ -68,18 +69,38 @@ More commands:
 ## ✨ Auto reactions
 
 ```
-/autoreact set channel:#clips emojis::gg: :hype: 🔥     → every new message in #clips gets these, in this order
+/autoreact set channel:#clips                          → opens a list of your server's emojis: tick them, then Save
+/autoreact set channel:#clips emojis::gg: :hype: 🔥     → or type them (this replaces the channel's list)
 /autoreact add channel:#clips emojis::kekw:            → add more (up to 20 per channel)
 /autoreact remove channel:#clips emoji::hype:          → take one off (leave emoji: empty to turn the channel off)
 /autoreact list                                        → every channel and its emojis
 ```
-- In `emojis:`, type **:** and pick your server emojis from Discord's emoji menu, or paste them. Just the name works too (`:gg:`), and so do normal emojis.
+- **Easiest:** leave `emojis` empty and tick your emojis in the list (see [😀 the emoji list](#the-emoji-list) below). Animated emojis work without Nitro. Typing also works: server emoji names (`:gg:`) and normal emojis.
 - **Every new message** gets the reactions: from members, other bots and webhooks, and the bot's own announcements and welcome messages. Add `bots:False` to `set` to react to members' messages only.
 - A split announcement only gets them on its **last part**, so it still reads as one post. The bot's role panels are left alone, so their reactions keep their meaning.
 - **Forum and media channels:** the first message of every new post gets the reactions (great for 👍 👎 on suggestions). Replies inside a post don't.
 - Only new messages get reactions. Messages that are already there aren't touched.
 - The bot needs **View Channel**, **Read Message History** and **Add Reactions** in that channel (checked when you run `set`). Discord adds about 4 reactions a second per channel, so a long list takes a moment on each message.
 - Delete one of the emojis from the server and the bot takes it off every list by itself.
+
+## 😀 React to any message
+
+```
+/react message:1288976543210987654                     → finds the message in any channel and opens the emoji list
+/react message:<message link>                          → same, with a link (right-click → Copy Message Link)
+/react message:1288976543210987654 emojis::gg: 🔥       → reacts straight away, no list
+```
+- Or skip the ID: right-click the message → **Apps → React as Bot**.
+- **Copy Message ID** appears when Developer Mode is on (User Settings → Advanced → Developer Mode). With just an ID, the bot looks in the current channel first, then every channel and thread it can read. Pick `channel:` to tell it where to look.
+- The list starts with the bot's current reactions on that message ticked. Untick one to take the bot's reaction off. Other people's reactions are never touched.
+
+### The emoji list
+
+Used by `/react`, **React as Bot** and `/autoreact set` (with the emojis box empty). Only you see it.
+- Your server's emojis, **animated ones too**, A→Z in dropdowns of 25 (100 per page). Open a dropdown and tick as many as you like. They're added in the order you tick them, up to 20.
+- **◀️ / ▶️** change page, **🔍 Search** finds emojis by name, **⌨️ Type** adds normal emojis (🔥 👍), **🗑️ Clear** starts over.
+- **✅ React** / **✅ Save** applies your choice; **Cancel** changes nothing. A list stays usable for 30 minutes.
+- Emojis the bot can't use are hidden: emojis limited to roles the bot doesn't have, and emojis disabled after a lost boost level.
 
 ## 📢 Announcements
 

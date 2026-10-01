@@ -16,6 +16,7 @@ const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
 const autoReact = require('../src/features/autoReact');
+const reactPicker = require('../src/features/reactPicker');
 const store = require('../src/lib/store');
 const { toJSON } = require('../tests/helpers/validate');
 
@@ -224,15 +225,26 @@ function render(c, img) {
       const inner = chosen.length
         ? chosen.map((o) => `<span class="chip">${emojiHtml(o.emoji)}${esc(o.label)}</span>`).join('')
         : `<span class="ph">${esc(c.placeholder ?? 'Make a selection')}</span>`;
-      return `<div class="select">${inner}<span class="chev">⌄</span></div>`;
+      let menu = '';
+      if (openMenus > 0) {
+        openMenus--;
+        const shown = c.options.slice(0, 7);
+        menu = `<div class="menu">${shown
+          .map((o) => `<div class="opt${o.default ? ' on' : ''}"><span class="box">${o.default ? '✓' : ''}</span>${emojiHtml(o.emoji)}<span>${esc(o.label)}</span></div>`)
+          .join('')}${c.options.length > shown.length ? `<div class="opt more">…and ${c.options.length - shown.length} more (scroll)</div>` : ''}</div>`;
+      }
+      return `<div class="select${menu ? ' open' : ''}">${inner}<span class="chev">⌄</span></div>${menu}`;
     }
     default:
       return '';
   }
 }
 
-function message(payload, { img, ephemeral = false, reactions = null, time = 'Today at 18:30' } = {}) {
+let openMenus = 0; // how many dropdowns of the message being drawn are shown open
+function message(payload, { img, ephemeral = false, reactions = null, time = 'Today at 18:30', open = 0 } = {}) {
+  openMenus = open;
   const comps = payload.components.map(toJSON).map((c) => render(c, img)).join('');
+  openMenus = 0;
   const react = reactions ? `<div class="reactions">${reactions.map(([e, n, me]) => `<span class="reaction ${me ? 'me' : ''}">${e}<b>${n}</b></span>`).join('')}</div>` : '';
   const eph = ephemeral ? '<div class="eph">👁 Only you can see this · <a>Dismiss message</a></div>' : '';
   return `<div class="msg"><img class="avatar" src="${iconUri}" alt=""><div class="mbody"><div class="meta"><span class="bname">${esc(config.brand.name)}</span><span class="app">✓ APP</span><span class="time">${time}</span></div>${comps}${react}${eph}</div></div>`;
@@ -380,6 +392,29 @@ const avatarUri = dataUri(avatar);
     6: { emojis: [uni('👍'), uni('👎')], bots: false },
   };
   const autoReactList = autoReact.listCard(guild);
+
+  /* emoji picker (/react, React as Bot, /autoreact set with no emojis typed) — the real picker layout */
+  const names = ['aether_spin', 'blob_dance', 'catjam', 'clap_anim', 'crown_glow', 'fire_anim', 'gg_wp', 'heart_beat', 'hype_train', 'party_parrot', 'pepe_clap', 'rocket_boost', 'sparkles_anim', 'trophy_shine', 'valorant_ace', 'wave_hi'];
+  const pickerEmojis = new Collection();
+  let next = 302000000000000000n;
+  for (let round = 0; round < 7; round++) {
+    for (const n of names) {
+      const id = String(next++);
+      pickerEmojis.set(id, { id, name: round ? `${n}_${round + 1}` : n, animated: true, available: true, roles: { cache: new Collection() } });
+    }
+  }
+  const pickerGuild = { ...guild, emojis: { cache: pickerEmojis }, members: { me: { roles: { cache: new Collection() } } } };
+  const pick = (name) => ({ ...pickerEmojis.find((e) => e.name === name) });
+  const pickerSession = reactPicker.newSession({ user: { id: '1' }, guildId: guild.id }, {
+    mode: 'message',
+    channelId: '3',
+    messageId: '4',
+    url: 'https://discord.com/channels/1/3/4',
+    authorId: '5',
+    chosen: [pick('aether_spin'), pick('catjam'), pick('crown_glow'), { id: null, name: '🔥', animated: false }],
+    initial: 1,
+  });
+  const pickerPayload = reactPicker.render(pickerGuild, pickerSession);
   const cemoji = '<span class="cemoji"></span>';
 
   /* /ids — a realistic server map */
@@ -448,6 +483,11 @@ const avatarUri = dataUri(avatar);
       message(autoReactList, { img: imgFor({}), ephemeral: true }) +
         message(plain[0], { img: imgFor({}), reactions: [[cemoji, 24], [cemoji, 19], ['🔥', 31], ['🏆', 12]] }),
     ],
+    [
+      '😀 Emoji list · /react · Apps → React as Bot',
+      'No typing: tick your server emojis (animated ones too, no Nitro needed) and the bot reacts in the order you ticked them. 100 emojis per page, A→Z, with search. <code>/react</code> takes a message ID or link; right-click → <b>Apps → React as Bot</b> needs neither. <code>/autoreact set</code> with the emojis box empty opens the same list.',
+      message(pickerPayload, { img: imgFor({}), ephemeral: true, open: 1 }),
+    ],
     ['Official announcement · Card style', 'Posted under the bot’s name with a banner, markdown, downloadable files, a footer and a localised timestamp. The ping sits above the card.', message(annParts[0], { img: imgFor({ 'attachment://season3.jpg': seasonBanner }) })],
     ['Official announcement · Plain style', 'Clean text without the box — still with title and role ping.', message(plain[0], { img: imgFor({}) })],
     ['Announcement preview (only you see this)', 'Every announcement is previewed privately first — Publish, Edit, switch style, or Discard.', message(annPreview, { img: imgFor({ 'attachment://season3.jpg': seasonBanner }), ephemeral: true })],
@@ -484,6 +524,7 @@ header{padding:36px 24px 12px;max-width:1000px;margin:0 auto}header h1{margin:0 
 .btn:hover{filter:brightness(1.12)}.btn.s1{background:#5865f2}.btn.s2{background:#4e5058}.btn.s3{background:#248046}.btn.s4{background:#da373c}.btn.s5{background:#4e5058}.btn[disabled]{opacity:.5;cursor:not-allowed}
 .btn .ext{opacity:.8;font-size:12px}.em{font-size:17px;line-height:1}
 .select{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#1e1f22;border:1px solid #1e1f22;border-radius:8px;min-height:40px;padding:6px 36px 6px 10px;position:relative;width:100%}
+.select.open{border-color:#5865f2}.menu{background:#2b2d31;border:1px solid #1e1f22;border-radius:8px;margin:4px 0 6px;padding:4px 0;box-shadow:0 8px 16px rgba(0,0,0,.24)}.opt{display:flex;align-items:center;gap:10px;padding:7px 12px;font-size:15px}.opt.on{background:#35373c}.opt .box{width:18px;height:18px;border:2px solid #80848e;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#fff;flex:none}.opt.on .box{background:#5865f2;border-color:#5865f2}.opt.more{color:var(--muted);font-size:13px;padding-left:40px}
 .select .ph{color:var(--muted)}.chip{display:inline-flex;align-items:center;gap:4px;background:#3f4147;border-radius:6px;padding:2px 8px;font-size:14px}.chev{position:absolute;right:12px;top:8px;color:var(--muted)}
 .file{display:flex;align-items:center;gap:12px;background:#2b2d31;border:1px solid #1e1f22;border-radius:8px;padding:12px;max-width:420px;background:rgba(0,0,0,.18)}.ficon{font-size:28px}.fname{color:var(--link)}.fsize{font-size:12px;color:var(--muted)}.dl{margin-left:auto;color:var(--muted);font-size:20px}
 .pill{background:color-mix(in srgb,var(--c,#5865f2) 18%,transparent);color:var(--c,#c9cdfb);border-radius:4px;padding:0 3px;font-weight:500}

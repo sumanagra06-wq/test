@@ -21,6 +21,7 @@ const welcome = require('../src/features/welcome');
 const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
 const autoReact = require('../src/features/autoReact');
+const reactPicker = require('../src/features/reactPicker');
 const { commands } = require('../src/commands');
 const { colorChoices } = require('../src/interactions');
 
@@ -194,7 +195,7 @@ function panel(style, mode, n, extra = {}) {
     assert.equal(utils.safeFileName('🔥🔥.jpg', used), 'file.jpg');
   });
   check('commands', () => {
-    assert.equal(commands.length, 9);
+    assert.equal(commands.length, 11);
     const names = commands.map((c) => c.name);
     assert.ok(names.includes('Post as Announcement') && names.includes('announce'));
     const ids = commands.find((c) => c.name === 'ids');
@@ -204,6 +205,13 @@ function panel(style, mode, n, extra = {}) {
     assert.deepEqual(ar.options.map((o) => o.name), ['set', 'add', 'remove', 'list']);
     const channelTypes = ar.options[0].options.find((o) => o.name === 'channel').channel_types;
     for (const t of [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum, ChannelType.PublicThread]) assert.ok(channelTypes.includes(t));
+    assert.equal(ar.options[0].options.find((o) => o.name === 'emojis').required, false, 'empty emojis → pick from a list');
+    const react = commands.find((c) => c.name === 'react');
+    assert.equal(react?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/react is for staff');
+    assert.deepEqual(react.options.map((o) => [o.name, Boolean(o.required)]), [['message', true], ['emojis', false], ['channel', false]]);
+    const app = commands.find((c) => c.name === 'React as Bot');
+    assert.equal(app?.type, 3, 'right-click message app');
+    assert.ok(commands.filter((c) => c.type === 3).length <= 5, 'Discord allows 5 message apps');
   });
 
   await checkAsync('auto reactions: reading the emoji list', async () => {
@@ -485,6 +493,72 @@ function panel(style, mode, n, extra = {}) {
       });
     }
   }
+
+  check('emoji picker: pages, search, limits', () => {
+    const PAGE = reactPicker.PER_PAGE;
+    const make = (n, prefix, animated = true) =>
+      Array.from({ length: n }, (_, k) => {
+        const id = String(320000000000000000n + BigInt(k + (animated ? 0 : 5000)));
+        return [id, { id, name: `${prefix}_${String(k).padStart(3, '0')}_long_name_x`, animated, available: true, roles: { cache: new Collection() } }];
+      });
+    const server = {
+      id: guild.id,
+      members: { me: { roles: { cache: new Collection() } } },
+      channels: guild.channels,
+      emojis: {
+        cache: new Collection([
+          ...make(250, 'anim'),
+          ...make(3, 'still', false),
+          ['329999999999999999', { id: '329999999999999999', name: 'vip_only', animated: true, available: true, roles: { cache: new Collection([['1', {}]]) } }],
+          ['329999999999999998', { id: '329999999999999998', name: 'no_boost', animated: false, available: false, roles: { cache: new Collection() } }],
+        ]),
+      },
+    };
+    const fake = { user: { id: '100000000000000009' }, guildId: guild.id };
+    const json = (p) => JSON.stringify(p.components.map((c) => (c.toJSON ? c.toJSON() : c)));
+    const selects = (p) => p.components[0].toJSON().components.filter((c) => c.type === 1 && c.components[0].type === 3).map((r) => r.components[0]);
+    const buttons = (p) => p.components[0].toJSON().components.filter((c) => c.type === 1 && c.components[0].type === 2).flatMap((r) => r.components);
+
+    const s = reactPicker.newSession(fake, { mode: 'channel', channelId: '200000000000000001', bots: true });
+    let p = reactPicker.render(server, s);
+    results.push(['emoji picker (253 emojis, page 1)', validatePayload('picker page 1', p)]);
+    assert.equal(selects(p).length, 4);
+    assert.ok(selects(p).every((m) => m.options.length === 25 && m.max_values === 25 && m.min_values === 0));
+    assert.equal(selects(p)[0].options[0].emoji.animated, true, 'animated emojis are shown');
+    assert.ok(!json(p).includes('vip_only') && !json(p).includes('no_boost'), 'emojis I can’t use are hidden');
+    assert.match(json(p), /Page 1\/3 · 253 emojis · A→Z · 2 hidden/);
+    assert.deepEqual(buttons(p).map((b) => b.label), ['Previous', 'Next', 'Search', 'Save (0)', 'Type', 'Clear', 'Cancel']);
+    assert.equal(buttons(p)[0].disabled, true);
+    assert.equal(buttons(p)[3].disabled, true, 'nothing to save yet');
+
+    s.page = 2;
+    p = reactPicker.render(server, s);
+    assert.equal(selects(p).length, 3, '253 − 200 = 53 → 3 lists');
+    assert.equal(selects(p).at(-1).options.length, 3);
+    assert.equal(buttons(p)[1].disabled, true, 'no page after the last');
+
+    s.chosen = server.emojis.cache.filter((e) => e.available).first(20).map((e) => ({ id: e.id, name: e.name, animated: e.animated }));
+    s.note = 'Discord allows 20 different reactions per message, so 3 more couldn’t be added.';
+    s.page = 0;
+    p = reactPicker.render(server, s);
+    results.push(['emoji picker (20 chosen + note)', validatePayload('picker full', p)]);
+    assert.match(json(p), /Chosen 20\/20/);
+    assert.equal(selects(p)[0].options.filter((o) => o.default).length, 20, 'chosen emojis are ticked');
+
+    s.query = 'still';
+    p = reactPicker.render(server, s);
+    assert.equal(selects(p).length, 1);
+    assert.deepEqual(buttons(p).map((b) => b.label).slice(0, 1), ['Clear search']);
+
+    const empty = { ...server, emojis: { cache: new Collection() } };
+    const m = reactPicker.newSession(fake, { mode: 'message', channelId: '200000000000000001', messageId: '1', url: 'https://discord.com/channels/1/2/3', authorId: '5', initial: 2 });
+    p = reactPicker.render(empty, m);
+    results.push(['emoji picker (no custom emojis)', validatePayload('picker empty', p)]);
+    assert.equal(selects(p).length, 0);
+    assert.match(json(p), /no custom emojis I can use yet/);
+    assert.equal(buttons(p).find((b) => b.custom_id.startsWith('ep:ok')).label, 'Remove my reactions', 'everything unticked → take my reactions off');
+    assert.ok(PAGE === 100);
+  });
 
   check('auto reactions: list card fits Discord’s limits', () => {
     const saved = store.guild(guild.id).autoReact;

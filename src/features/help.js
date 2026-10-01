@@ -33,9 +33,11 @@ function helpCard(guild, botUser) {
     ),
     ui.text(
       [
-        '### ✨ Auto reactions',
-        `${cmd('autoreact set')} — your server emojis on every new message in a channel (up to 20, bots too)`,
+        '### ✨ Reactions',
+        `${cmd('autoreact set')} — your server emojis on every new message in a channel (leave emojis empty to pick from a list)`,
         `${cmd('autoreact add')} · ${cmd('autoreact remove')} · ${cmd('autoreact list')}`,
+        `${cmd('react')} — the bot reacts to any message (ID or link) with emojis picked from a list`,
+        'Right-click any message → **Apps → React as Bot**',
       ].join('\n'),
     ),
     ui.text(

@@ -135,8 +135,22 @@ function mockMessage(channel, payload, extra = {}) {
     async react(e) {
       reacts.push(e);
       (m.reacted ??= []).push(String(e));
-      const key = String(e).match(/:(\d+)>$/)?.[1] ?? e;
-      m.reactions.cache.set(key, { emoji: { id: null, name: e }, users: { remove: async () => {} }, remove: async () => {} });
+      // like Discord: one entry per emoji, with a count and whether the bot (me) reacted
+      const custom = String(e).match(/^<(a?):([\w~]+):(\d+)>$/);
+      const key = custom?.[3] ?? e;
+      const reaction = m.reactions.cache.get(key) ?? { emoji: custom ? { id: custom[3], name: custom[2], animated: Boolean(custom[1]) } : { id: null, name: e }, count: 0, me: false };
+      if (!reaction.me) reaction.count++;
+      reaction.me = true;
+      reaction.users = {
+        remove: async () => {
+          (m.unreacted ??= []).push(String(e));
+          reaction.count--;
+          reaction.me = false;
+          if (!reaction.count) m.reactions.cache.delete(key);
+        },
+      };
+      reaction.remove = async () => m.reactions.cache.delete(key);
+      m.reactions.cache.set(key, reaction);
     },
     async crosspost() {},
     ...extra,
@@ -1136,6 +1150,122 @@ async function step(name, fn) {
     assert.ok(g().autoReact['200000000000000006']);
     autoReact.onChannelDelete({ id: '200000000000000006', guild });
     assert.equal(g().autoReact['200000000000000006'], undefined);
+  });
+
+  console.log('Emoji picker & /react');
+  // a server full of animated emojis: typing those needs Nitro, so the bot shows them in a list
+  const blobs = Array.from({ length: 130 }, (_, k) => ({ id: String(330000000000000000n + BigInt(k)), name: `blob_${String(k).padStart(3, '0')}`, animated: true }));
+  for (const e of blobs) guild.emojis.cache.set(e.id, { ...e, available: true, roles: { cache: new Collection() } });
+  const picker = (payload) => {
+    const json = JSON.stringify(payload.components.map(toJSON));
+    const lists = payload.components.map(toJSON)[0].components.filter((c) => c.type === 1 && c.components[0].type === 3).map((r) => r.components[0]);
+    return { json, lists, sid: json.match(/"ep:ok:([0-9a-f]+)"/)?.[1] };
+  };
+  const click = (name, customId, extra = {}) => run(name, { type: 'button', customId, fromMessage: true, ...extra });
+  const tick = (name, sid, slot, values) => run(name, { type: 'select', customId: `ep:s:${sid}:${slot}`, values, fromMessage: true });
+  const opened = {}; // the /react list from the first step, used by the next one
+
+  await step('/react message:<just the ID> → finds it in another channel, opens the emoji list with my reactions ticked', async () => {
+    const target = incoming(chat, { content: 'GG to the winners!' });
+    await target.react(tag(EMO.party)); // I reacted with :party: earlier
+    target.reacted = [];
+    // other people's 👍 must never be touched
+    target.reactions.cache.set('👍', { emoji: { id: null, name: '👍' }, count: 3, me: false, users: { remove: async () => assert.fail('removed someone else’s reaction') } });
+    const r = await run('react by id', { type: 'slash', commandName: 'react', options: { message: target.id } });
+    assert.equal(r.kind, 'editReply', 'deferred: searching can take a moment');
+    const { json, lists, sid } = picker(r.payload);
+    assert.ok(sid && json.includes('React to a message') && json.includes(target.url));
+    assert.match(json, /Chosen 1\/20/);
+    assert.match(json, /Page 1\/2 · 133 emojis · A→Z · 1 hidden/, '130 blobs + hype, gg, party; :vip: is role-limited');
+    assert.equal(lists.length, 4, '100 emojis per page in 4 lists');
+    assert.equal(lists[0].options[0].emoji.animated, true);
+    Object.assign(opened, { target, sid });
+  });
+
+  await step('tick/untick across pages, search, type → reacts in the order ticked and takes off what I unticked', async () => {
+    const { target, sid } = opened;
+    let u = await tick('tick 3', sid, 0, [blobs[2].id, blobs[0].id, blobs[1].id]);
+    assert.equal(u.kind, 'update');
+    assert.match(texts(u.payload), /Chosen 4\/20/);
+    u = await tick('untick blob_001', sid, 0, [blobs[0].id, blobs[2].id]);
+    assert.match(texts(u.payload), /Chosen 3\/20/);
+    u = await click('next page', `ep:p:${sid}:1:next`);
+    assert.match(texts(u.payload), /Page 2\/2/);
+    const slot = picker(u.payload).lists.findIndex((l) => l.options.some((o) => o.value === EMO.hype.id));
+    const partyTicked = picker(u.payload).lists[slot].options.find((o) => o.value === EMO.party.id).default;
+    assert.equal(partyTicked, true, 'my current reaction shows ticked');
+    u = await tick('tick hype, untick party', sid, slot, [EMO.hype.id]);
+    const f = await click('search', `ep:f:${sid}`);
+    assert.equal(f.kind, 'showModal');
+    u = await run('search submit', { type: 'modal', customId: `ep:fm:${sid}`, fields: { q: ':BLOB_12' }, fromMessage: true });
+    assert.match(texts(u.payload), /10 emojis matching “blob_12”/);
+    assert.equal(picker(u.payload).lists[0].options.length, 10);
+    u = await click('clear search', `ep:fc:${sid}`);
+    assert.match(texts(u.payload), /Page 1\/2/);
+    u = await run('type', { type: 'modal', customId: `ep:tm:${sid}`, fields: { emojis: '🎉 :nope:' }, fromMessage: true });
+    assert.ok(texts(u.payload).includes('Couldn’t use: This server has no emoji called `:nope:`'));
+    assert.ok(texts(u.payload).includes(`${tag(blobs[0])} ${tag(blobs[2])} ${tag(EMO.hype)} 🎉`), 'kept in the order they were ticked');
+    const done = await click('react', `ep:ok:${sid}`);
+    assert.equal(done.kind, 'editReply');
+    assert.ok(texts(done.payload).includes('Reactions updated') && texts(done.payload).includes('Took off'));
+    assert.deepEqual(target.reacted, [tag(blobs[0]), tag(blobs[2]), tag(EMO.hype), '🎉']);
+    assert.deepEqual(target.unreacted, [tag(EMO.party)], 'only my own unticked reaction came off');
+    assert.equal(target.reactions.cache.get('👍').count, 3);
+    await run('list gone', { type: 'button', customId: `ep:ok:${sid}`, fromMessage: true }, { expectError: true });
+  });
+
+  await step('/react with a link + typed emojis → reacts straight away; bad input → clear errors', async () => {
+    const other = incoming(C.other, { content: 'Bracket is live' });
+    const r = await run('react typed', { type: 'slash', commandName: 'react', options: { message: other.url, emojis: ':hype: 🔥' } });
+    assert.ok(texts(r.payload).includes('Reactions updated'));
+    assert.deepEqual(other.reacted, [tag(EMO.hype), '🔥']);
+    let e = await run('react missing', { type: 'slash', commandName: 'react', options: { message: '123456789012345678' } }, { expectError: true });
+    assert.ok(texts(e.payload).includes('No channel I can read has a message with that ID'));
+    await run('react junk', { type: 'slash', commandName: 'react', options: { message: 'hello' } }, { expectError: true });
+    e = await run('react other server', { type: 'slash', commandName: 'react', options: { message: `https://discord.com/channels/999999999999999999/${C.other.id}/${other.id}` } }, { expectError: true });
+    assert.ok(texts(e.payload).includes('different server'));
+  });
+
+  await step('right-click → Apps → React as Bot → same emoji list', async () => {
+    const msg = incoming(C.news, { content: 'Season 5 dates' });
+    const r = await run('react as bot', { type: 'context', commandName: 'React as Bot', targetMessage: msg });
+    const { sid, json } = picker(r.payload);
+    assert.ok(sid && json.includes('Nothing chosen yet'));
+    await tick('tick', sid, 0, [blobs[5].id]);
+    const done = await click('react', `ep:ok:${sid}`);
+    assert.ok(texts(done.payload).includes('Reactions updated'));
+    assert.deepEqual(msg.reacted, [tag(blobs[5])]);
+  });
+
+  await step('/autoreact set with no emojis typed → pick from the list → Save (20 max); Cancel changes nothing', async () => {
+    const r = await autoreact('autoreact pick', 'set', { channel: chat });
+    let { sid, json } = picker(r.payload);
+    assert.ok(json.includes('Auto reactions for') && json.includes('Save (0)'));
+    const u = await tick('tick 25', sid, 0, blobs.slice(0, 25).map((e) => e.id));
+    assert.match(texts(u.payload), /Chosen 20\/20/);
+    assert.ok(texts(u.payload).includes('5 more couldn’t be added'));
+    const saved = await click('save', `ep:ok:${sid}`);
+    assert.equal(saved.kind, 'update');
+    assert.ok(texts(saved.payload).includes('Auto reactions on'));
+    assert.deepEqual(g().autoReact[chat.id].emojis.map((e) => e.name), blobs.slice(0, 20).map((e) => e.name));
+    assert.ok(g().autoReact[chat.id].emojis.every((e) => e.animated));
+    const m = incoming(chat);
+    await autoReact.onMessage(m);
+    assert.equal(reactedWith(m).length, 20, 'every new message gets all 20');
+    const again = await autoreact('autoreact pick again', 'set', { channel: chat });
+    ({ sid } = picker(again.payload));
+    assert.match(texts(again.payload), /Chosen 20\/20/, 'the current list shows ticked');
+    const c = await click('cancel', `ep:x:${sid}`);
+    assert.ok(texts(c.payload).includes('Cancelled'));
+    assert.equal(g().autoReact[chat.id].emojis.length, 20, 'cancel changes nothing');
+    await autoreact('autoreact chat off', 'remove', { channel: chat });
+  });
+
+  await step('only the person who opened a list can use it', async () => {
+    const r = await autoreact('autoreact pick 3', 'set', { channel: chat });
+    const { sid } = picker(r.payload);
+    const e = await run('not yours', { type: 'button', customId: `ep:c:${sid}`, fromMessage: true, member: user }, { expectError: true });
+    assert.ok(texts(e.payload).includes('belongs to someone else'));
   });
 
   await store.flush();

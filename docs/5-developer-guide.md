@@ -31,6 +31,7 @@ src/
 │   ├── buttonRoles.js    Button-role panels, the “My roles” manager, /buttonroles
 │   ├── reactionRoles.js  Reaction-role panels, reaction events, /reactionroles
 │   ├── autoReact.js      Auto reactions: /autoreact, reacting to new messages (queued per channel, in order)
+│   ├── reactPicker.js    Clickable emoji list (pages, search) + /react and “React as Bot”
 │   ├── announcements.js  Composer, private preview, publish/edit, right-click apps, /announce
 │   ├── welcome.js        Welcome messages, auto-role, /welcome
 │   ├── serverIds.js      /ids: channel + role map with IDs (pages + .txt file)
@@ -43,8 +44,8 @@ src/
     ├── color.js          Colour names (purple, gold…) → hex
     └── log.js            Timestamped console logging
 tests/
-├── selftest.js           97 checks of every message/form against Discord's layout limits
-├── flowtest.js           49 end-to-end flows through the real handlers on a mock Discord server
+├── selftest.js           98 checks of every message/form against Discord's layout limits
+├── flowtest.js           55 end-to-end flows through the real handlers on a mock Discord server
 └── helpers/validate.js   Payload validator shared by the tests and the preview tool
 tools/
 └── preview-html.js       Rebuilds docs/previews/ from the bot's real message payloads
@@ -72,6 +73,7 @@ Custom IDs on buttons, menus and forms start with a prefix that tells `interacti
 | `an:` | Announcements (composer, preview buttons, edit form, `an:repost:<record>:<user>` button) |
 | `wl:` | Welcome (message form) |
 | `ids:` | `/ids` page buttons (`ids:go:<page>:<button>`) |
+| `ep:` | Emoji list: dropdowns `ep:s:<list>:<slot>`, pages, search, type, clear, confirm, cancel (lists live in memory for 30 minutes) |
 
 **Long announcements.** `renderParts()` splits the text with `chunkText()` (preferring a cut right before a heading, and never right after a line ending in “:”), then returns each part as `{ payload, quiet }`. A part that must not notify on arrival (parts 2+ of a pinged post, or every part of an edit or repost) is sent as `quiet` first: the same text, but with the ping not switched on and without files. It is then edited into `payload`. Discord re-reads mentions when a message is edited, so the part turns gold without notifying anyone. Discord’s `SUPPRESS_NOTIFICATIONS` (“silent”) flag is deliberately **not** used: the client always shows a new name header when a silent message follows a normal one.
 

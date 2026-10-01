@@ -11,12 +11,14 @@ const welcome = require('./features/welcome');
 const help = require('./features/help');
 const serverIds = require('./features/serverIds');
 const autoReact = require('./features/autoReact');
+const reactPicker = require('./features/reactPicker');
 
 const slashCommands = {
   announce: announcements.command,
   buttonroles: buttonRoles.command,
   reactionroles: reactionRoles.command,
   autoreact: autoReact.command,
+  react: reactPicker.command,
   welcome: welcome.command,
   ids: serverIds.command,
   help: help.command,
@@ -25,6 +27,7 @@ const slashCommands = {
 const contextMenus = {
   'Post as Announcement': announcements.postAsAnnouncement,
   'Edit Announcement': announcements.editAnnouncement,
+  'React as Bot': reactPicker.reactAsBot,
 };
 
 const modalHandlers = {
@@ -32,12 +35,14 @@ const modalHandlers = {
   br: buttonRoles.onModal,
   rr: reactionRoles.onModal,
   wl: welcome.onModal,
+  ep: reactPicker.onModal,
 };
 
 const componentHandlers = {
   an: announcements.onButton,
   br: buttonRoles.onComponent,
   ids: serverIds.onComponent,
+  ep: reactPicker.onComponent,
 };
 
 function colorChoices(query) {
