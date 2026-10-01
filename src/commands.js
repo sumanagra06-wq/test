@@ -248,6 +248,7 @@ const REACT_CHANNELS = [
   ChannelType.AnnouncementThread,
 ];
 const reactChannelOption = (o) => o.setName('channel').setDescription('Where to react').addChannelTypes(...REACT_CHANNELS).setRequired(true);
+const templateOption = (o) => o.setName('name').setDescription('Which template').setRequired(true).setAutocomplete(true).setMaxLength(100);
 
 const autoreact = new SlashCommandBuilder()
   .setName('autoreact')
@@ -278,7 +279,31 @@ const autoreact = new SlashCommandBuilder()
       .addChannelOption(reactChannelOption)
       .addStringOption((o) => o.setName('emoji').setDescription('Emoji to remove (leave empty to turn the channel off)').setAutocomplete(true).setMaxLength(100)),
   )
-  .addSubcommand((s) => s.setName('list').setDescription('Show every channel with auto reactions'));
+  .addSubcommand((s) => s.setName('list').setDescription('Show every channel with auto reactions'))
+  .addSubcommand((s) =>
+    s
+      .setName('copy')
+      .setDescription('Copy a channel’s emojis to many other channels at once')
+      .addChannelOption((o) => o.setName('from').setDescription('The channel to copy from').addChannelTypes(...REACT_CHANNELS).setRequired(true)),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('template')
+      .setDescription('Emoji templates: one emoji list for many channels')
+      .addSubcommand((s) =>
+        s
+          .setName('create')
+          .setDescription('New template: pick its emojis from a list, or copy them from a channel')
+          .addStringOption((o) => o.setName('name').setDescription('A name for the template, e.g. Hype').setRequired(true).setMaxLength(32))
+          .addChannelOption((o) =>
+            o.setName('from').setDescription('Copy this channel’s emojis (leave empty to pick from a list)').addChannelTypes(...REACT_CHANNELS),
+          ),
+      )
+      .addSubcommand((s) => s.setName('apply').setDescription('Put a template on many channels at once').addStringOption(templateOption))
+      .addSubcommand((s) => s.setName('edit').setDescription('Change a template’s emojis: every channel using it updates').addStringOption(templateOption))
+      .addSubcommand((s) => s.setName('delete').setDescription('Delete a template (its channels keep their emojis)').addStringOption(templateOption))
+      .addSubcommand((s) => s.setName('list').setDescription('Show your templates and the channels using them')),
+  );
 
 /** Channels a message can be in (for /react). */
 const MESSAGE_CHANNELS = [

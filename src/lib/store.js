@@ -40,8 +40,10 @@ function defaultGuild() {
     buttonPanels: {},
     /** first messageId → announcement record (used for editing) */
     announcements: {},
-    /** channelId → auto reactions: { emojis: [{id, name, animated}], bots: boolean, updatedAt } */
+    /** channelId → auto reactions: { emojis: [{id, name, animated}], bots: boolean, template?: templateId, updatedAt } */
     autoReact: {},
+    /** templateId → emoji template: { name, emojis: [{id, name, animated}], createdAt, updatedAt } */
+    reactTemplates: {},
   };
 }
 
@@ -56,6 +58,7 @@ function withDefaults(data) {
     buttonPanels: g.buttonPanels || {},
     announcements: g.announcements || {},
     autoReact: g.autoReact || {},
+    reactTemplates: g.reactTemplates || {},
   };
 }
 

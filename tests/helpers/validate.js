@@ -41,9 +41,26 @@ function validatePayload(name, payload, { ephemeralOk = true } = {}) {
         break;
       case ComponentType.StringSelect:
         assert.ok(c.options.length >= 1 && c.options.length <= 25, `${name}: select options 1-25`);
-        assert.ok(c.max_values <= c.options.length, `${name}: max_values > options`);
-        for (const o of c.options) assert.ok(o.label.length <= 100 && o.value.length <= 100, `${name}: option too long`);
+        assert.ok((c.max_values ?? 1) <= c.options.length && (c.min_values ?? 1) <= (c.max_values ?? 1), `${name}: max_values > options`);
+        assert.ok(c.options.filter((o) => o.default).length <= (c.max_values ?? 1), `${name}: more ticked options than max_values`);
+        assert.equal(new Set(c.options.map((o) => o.value)).size, c.options.length, `${name}: duplicate option values`);
+        for (const o of c.options) {
+          assert.ok(o.label.length <= 100 && o.value.length <= 100, `${name}: option too long`);
+          if (o.description) assert.ok(o.description.length <= 100, `${name}: option description too long`);
+        }
+        if (c.placeholder) assert.ok(c.placeholder.length <= 150, `${name}: placeholder too long`);
         break;
+      case ComponentType.ChannelSelect:
+      case ComponentType.RoleSelect:
+      case ComponentType.UserSelect:
+      case ComponentType.MentionableSelect: {
+        const min = c.min_values ?? 1;
+        const max = c.max_values ?? 1;
+        assert.ok(min >= 0 && min <= max && max >= 1 && max <= 25, `${name}: select min/max values out of range`);
+        assert.ok((c.default_values ?? []).length <= max, `${name}: more default values than max_values`);
+        if (c.placeholder) assert.ok(c.placeholder.length <= 150, `${name}: placeholder too long`);
+        break;
+      }
       case ComponentType.MediaGallery:
         assert.ok(c.items.length >= 1 && c.items.length <= 10, `${name}: gallery needs 1-10 items`);
         for (const i of c.items) if (i.media.url.startsWith('attachment://')) refs.add(i.media.url.slice(13));

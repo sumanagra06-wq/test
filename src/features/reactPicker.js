@@ -15,6 +15,7 @@ const config = require('../config');
 const ui = require('../lib/ui');
 const { UserError, truncate, emojiKey, emojiText, parseMessageRef, assertBotChannelPerms } = require('../lib/utils');
 const autoReact = require('./autoReact');
+const { escapeMarkdown } = require('discord.js');
 
 /**
  * 😀 Emoji picker: a clickable list of the server's emojis, animated ones included. Typing animated emojis
@@ -25,6 +26,7 @@ const autoReact = require('./autoReact');
  *   the bot reacts to that one message (the picker starts with the bot's current reactions ticked;
  *   untick one to take it off).
  * - /autoreact set channel:#x with the emojis box left empty: saves the channel's auto reactions.
+ * - /autoreact template create · edit: saves an emoji template (see reactTemplates.js).
  *
  * One picker = one private message with up to 4 dropdowns of 25 emojis (100 per page), A→Z, plus
  * page buttons and a search for big servers. Emojis are added in the order they're ticked.
@@ -77,7 +79,18 @@ function serverEmojis(guild) {
 function header(guild, s) {
   if (s.mode === 'channel') {
     const posts = autoReact.POST_CHANNELS.has(guild.channels.cache.get(s.channelId)?.type);
-    return `## 😀 Auto reactions for <#${s.channelId}>\nTick the emojis every new ${posts ? 'post' : 'message'} there should get. They’re added in the order you tick them.`;
+    const link = require('./reactTemplates').templateOfChannel(guild.id, s.channelId);
+    const follows = link
+      ? `\n-# 📋 This channel follows the template “${escapeMarkdown(link.t.name)}”. Saving different emojis here gives it its own list (to change all its channels, use ${ui.cmd(guild.id, 'autoreact template edit')}).`
+      : '';
+    return `## 😀 Auto reactions for <#${s.channelId}>\nTick the emojis every new ${posts ? 'post' : 'message'} there should get. They’re added in the order you tick them.${follows}`;
+  }
+  if (s.mode === 'template') {
+    const using = s.templateId ? require('./reactTemplates').followers(guild.id, s.templateId).length : 0;
+    const after = using
+      ? `It’s used in ${using} channel${using === 1 ? '' : 's'}: they all update when you save.`
+      : 'After saving, put it on as many channels as you like.';
+    return `## 📋 Template “${escapeMarkdown(s.templateName)}”\nTick the emojis for this template, in the order they should appear. ${after}`;
   }
   const by = s.authorId ? ` by <@${s.authorId}>` : '';
   return `## 😀 React to a message\n[Open the message](${s.url})${by} · tick the emojis I should react with${s.initial ? ', untick one to take my reaction off' : ''}.`;
@@ -94,6 +107,7 @@ function chosenText(s) {
 
 function confirmButton(s) {
   if (s.mode === 'channel') return { label: `Save (${s.chosen.length})`, disabled: !s.chosen.length };
+  if (s.mode === 'template') return { label: `Save template (${s.chosen.length})`, disabled: !s.chosen.length };
   if (!s.chosen.length) return { label: 'Remove my reactions', disabled: !s.initial };
   return { label: `React (${s.chosen.length})`, disabled: false };
 }
@@ -176,6 +190,13 @@ const tooMany = (n) => `Discord allows ${MAX} different reactions per message, s
 function openForChannel(interaction, channel, { chosen = [], bots = true } = {}) {
   const s = newSession(interaction, { mode: 'channel', channelId: channel.id, bots, chosen: chosen.map(plain) });
   return ui.respond(interaction, render(interaction.guild, s));
+}
+
+/** The emoji list for a template: a new one (templateId null) or an existing one (its emojis ticked). */
+function openForTemplate(interaction, { templateId, name, chosen = [] }, { update = false } = {}) {
+  const s = newSession(interaction, { mode: 'template', templateId, templateName: name, chosen: chosen.map(plain) });
+  const payload = render(interaction.guild, s);
+  return update ? ui.updateMessage(interaction, payload) : ui.respond(interaction, payload);
 }
 
 /** The reactions the bot itself has on a message. */
@@ -367,6 +388,11 @@ async function confirm(interaction, s) {
     sessions.delete(s.sid);
     return ui.updateMessage(interaction, payload);
   }
+  if (s.mode === 'template') {
+    const payload = require('./reactTemplates').saveFromPicker(guild, s);
+    sessions.delete(s.sid);
+    return ui.updateMessage(interaction, payload);
+  }
   // reacting takes a moment (Discord allows about 4 reactions a second)
   await ui.deferUpdate(interaction);
   const channel = guild.channels.cache.get(s.channelId) ?? (await guild.channels.fetch(s.channelId).catch(() => null));
@@ -443,6 +469,7 @@ module.exports = {
   onComponent,
   onModal,
   openForChannel,
+  openForTemplate,
   findMessage,
   render,
   newSession,

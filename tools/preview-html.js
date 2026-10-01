@@ -17,6 +17,7 @@ const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
 const autoReact = require('../src/features/autoReact');
 const reactPicker = require('../src/features/reactPicker');
+const reactTemplates = require('../src/features/reactTemplates');
 const store = require('../src/lib/store');
 const { toJSON } = require('../tests/helpers/validate');
 
@@ -220,6 +221,15 @@ function render(c, img) {
       return `<div class="row">${c.components.map((x) => render(x, img)).join('')}</div>`;
     case 2:
       return `<button class="btn s${c.style}" ${c.disabled ? 'disabled' : ''}>${emojiHtml(c.emoji)}${c.label ? `<span>${esc(c.label)}</span>` : ''}${c.style === 5 ? '<span class="ext">↗</span>' : ''}</button>`;
+    case 8: {
+      // channel menu: picked channels show as chips (categories with a folder)
+      const picked = c.default_values ?? [];
+      const folder = (c.channel_types ?? []).length === 1 && c.channel_types[0] === 4;
+      const inner = picked.length
+        ? picked.map((d) => `<span class="chip">${folder ? '📁 ' : '#'}${esc(channelNames[d.id] ?? 'channel')}</span>`).join('')
+        : `<span class="ph">${esc(c.placeholder ?? 'Select a channel')}</span>`;
+      return `<div class="select">${inner}<span class="chev">⌄</span></div>`;
+    }
     case 3: {
       const chosen = c.options.filter((o) => o.default);
       const inner = chosen.length
@@ -415,6 +425,41 @@ const avatarUri = dataUri(avatar);
     initial: 1,
   });
   const pickerPayload = reactPicker.render(pickerGuild, pickerSession);
+
+  /* emoji templates (/autoreact template apply, /autoreact copy) — the real channel chooser and template list */
+  const { ChannelType: CT, PermissionFlagsBits: PF } = require('discord.js');
+  const tplChannels = new Collection();
+  const addChannel = (id, name, type, parentId = null, canReact = true) => {
+    channelNames[id] = name;
+    tplChannels.set(id, { id, name, type, parentId, permissionsFor: () => ({ has: (p) => p === PF.ViewChannel || canReact }) });
+  };
+  addChannel('20', 'COMMUNITY', CT.GuildCategory);
+  addChannel('3', 'announcements', CT.GuildAnnouncement);
+  addChannel('5', 'clips', CT.GuildText);
+  addChannel('6', 'suggestions', CT.GuildForum);
+  addChannel('7', 'memes', CT.GuildText, '20');
+  addChannel('8', 'highlights', CT.GuildText);
+  addChannel('9', 'fan-art', CT.GuildText, '20');
+  addChannel('10', 'general', CT.GuildText, '20');
+  addChannel('11', 'Lounge', CT.GuildVoice, '20');
+  addChannel('12', 'staff-chat', CT.GuildText, null, false);
+  const tplGuild = { ...guild, channels: { cache: tplChannels }, emojis: { cache: pickerEmojis }, members: { me: {} } };
+  const plainPick = (name) => {
+    const { id, animated } = pick(name);
+    return { id, name, animated };
+  };
+  const hypeList = [plainPick('fire_anim'), plainPick('hype_train'), plainPick('party_parrot'), plainPick('trophy_shine'), plainPick('gg_wp'), uni('🔥')];
+  const chillList = [plainPick('wave_hi'), plainPick('heart_beat'), uni('😂')];
+  const tg = store.guild(guild.id);
+  tg.reactTemplates = { t0hype001: { name: 'Hype', emojis: hypeList }, t0chill01: { name: 'Chill', emojis: chillList } };
+  tg.autoReact = {
+    ...tg.autoReact,
+    6: { emojis: chillList, bots: false, template: 't0chill01' },
+    9: { emojis: chillList, bots: true, template: 't0chill01' },
+  };
+  const tplSession = reactTemplates.newSession({ user: { id: '1' }, guildId: guild.id }, { mode: 'template', templateId: 't0hype001', picked: ['5', '8', '3', '12'], categories: ['20'] });
+  const tplChooser = reactTemplates.chooser(tplGuild, tplSession);
+  const tplList = reactTemplates.templateListCard(tplGuild);
   const cemoji = '<span class="cemoji"></span>';
 
   /* /ids — a realistic server map */
@@ -487,6 +532,11 @@ const avatarUri = dataUri(avatar);
       '😀 Emoji list · /react · Apps → React as Bot',
       'No typing: tick your server emojis (animated ones too, no Nitro needed) and the bot reacts in the order you ticked them. 100 emojis per page, A→Z, with search. <code>/react</code> takes a message ID or link; right-click → <b>Apps → React as Bot</b> needs neither. <code>/autoreact set</code> with the emojis box empty opens the same list.',
       message(pickerPayload, { img: imgFor({}), ephemeral: true, open: 1 }),
+    ],
+    [
+      '📋 Emoji templates · /autoreact template · /autoreact copy',
+      'Set your emojis once, then put them on many channels in one go: pick channels, <b>whole categories</b>, or <b>🌐 All chat channels</b>. Channels that use a template update together when you edit it. <code>/autoreact copy</code> copies one channel’s emojis to others. Channels where the bot can’t react are skipped and named.',
+      message(tplChooser, { img: imgFor({}), ephemeral: true }) + message(tplList, { img: imgFor({}), ephemeral: true }),
     ],
     ['Official announcement · Card style', 'Posted under the bot’s name with a banner, markdown, downloadable files, a footer and a localised timestamp. The ping sits above the card.', message(annParts[0], { img: imgFor({ 'attachment://season3.jpg': seasonBanner }) })],
     ['Official announcement · Plain style', 'Clean text without the box — still with title and role ping.', message(plain[0], { img: imgFor({}) })],

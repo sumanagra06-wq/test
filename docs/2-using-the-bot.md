@@ -6,7 +6,7 @@ Type `/help` in Discord for a clickable overview. Every feature is explained bel
 
 - [🎛️ Button roles](#️-button-roles)
 - [😀 Reaction roles](#-reaction-roles)
-- [✨ Auto reactions](#-auto-reactions)
+- [✨ Auto reactions](#-auto-reactions) · [📋 Emoji templates & copying](#-emoji-templates--copying)
 - [😀 React to any message](#-react-to-any-message)
 - [📢 Announcements](#-announcements)
 - [👋 Welcome](#-welcome)
@@ -83,6 +83,26 @@ More commands:
 - The bot needs **View Channel**, **Read Message History** and **Add Reactions** in that channel (checked when you run `set`). Discord adds about 4 reactions a second per channel, so a long list takes a moment on each message.
 - Delete one of the emojis from the server and the bot takes it off every list by itself.
 
+### 📋 Emoji templates & copying
+
+Set your emojis up once, then put them on as many channels as you like.
+
+```
+/autoreact copy from:#clips                            → copy #clips' emojis to other channels: pick them, then Apply
+/autoreact template create name:Hype                   → new template: tick its emojis in the list, then Save
+/autoreact template create name:Hype from:#clips       → or make it from a channel's emojis (#clips then uses it too)
+/autoreact template apply name:Hype                    → put it on many channels at once
+/autoreact template edit name:Hype                     → change its emojis: every channel using it updates
+/autoreact template delete name:Hype                   → delete it (its channels keep their emojis)
+/autoreact template list                               → your templates, where they're used, and menus to apply or edit them
+```
+- **Picking the channels:** a private card with two menus and a button. Pick up to 25 channels one by one, pick **whole categories** (all their chat channels), or press **🌐 All chat channels**. The card shows exactly which channels you picked before you press **✅ Apply**.
+- **Copy** is a one-time copy of a channel's emojis (and its `bots` setting). **A template stays linked:** edit it once and all its channels change together.
+- Change one of a template's channels on its own (`/autoreact set` · `add` · `remove`) and that channel gets its own list. Meant to change all of them? Press **📋 Update template … to this instead** on that confirmation.
+- Channels where the bot can't react (it's missing **Add Reactions**, for example) are skipped and named on the card, so you can fix their permissions and apply again.
+- **All chat channels** means the text, announcement, forum and media channels the bot can see. Voice-channel chats and threads are only added when you pick them one by one.
+- Up to 25 templates per server, 20 emojis each. `/autoreact list` shows the channels of each template together.
+
 ## 😀 React to any message
 
 ```
@@ -96,7 +116,7 @@ More commands:
 
 ### The emoji list
 
-Used by `/react`, **React as Bot** and `/autoreact set` (with the emojis box empty). Only you see it.
+Used by `/react`, **React as Bot**, `/autoreact set` (with the emojis box empty) and `/autoreact template create` · `edit`. Only you see it.
 - Your server's emojis, **animated ones too**, A→Z in dropdowns of 25 (100 per page). Open a dropdown and tick as many as you like. They're added in the order you tick them, up to 20.
 - **◀️ / ▶️** change page, **🔍 Search** finds emojis by name, **⌨️ Type** adds normal emojis (🔥 👍), **🗑️ Clear** starts over.
 - **✅ React** / **✅ Save** applies your choice; **Cancel** changes nothing. A list stays usable for 30 minutes.

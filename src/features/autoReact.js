@@ -1,5 +1,5 @@
 'use strict';
-const { ChannelType, MessageType } = require('discord.js');
+const { ChannelType, MessageType, escapeMarkdown } = require('discord.js');
 const config = require('../config');
 const store = require('../lib/store');
 const log = require('../lib/log');
@@ -139,18 +139,39 @@ const listText = (emojis) => emojis.map(emojiText).join(' ');
 
 function listCard(guild) {
   const cmd = (name) => ui.cmd(guild.id, name);
-  const entries = Object.entries(store.guild(guild.id).autoReact).filter(([, c]) => c.emojis?.length);
+  const g = store.guild(guild.id);
+  const entries = Object.entries(g.autoReact).filter(([, c]) => c.emojis?.length);
   if (!entries.length) {
     return ui.notice('info', 'No auto reactions yet', `Pick a channel and your emojis with ${cmd('autoreact set')}. I’ll react to every new message there.`);
   }
-  const blocks = [];
-  let used = 0;
+  const botsText = (list) => (list.every((c) => c.bots !== false) ? ' · 🤖 bots too' : list.every((c) => c.bots === false) ? ' · 👤 members only' : '');
+  // channels that follow the same template are shown together
+  const groups = new Map();
+  const singles = [];
   for (const [channelId, c] of entries) {
+    if (c.template && Object.hasOwn(g.reactTemplates, c.template)) {
+      if (!groups.has(c.template)) groups.set(c.template, []);
+      groups.get(c.template).push([channelId, c]);
+    } else singles.push([channelId, c]);
+  }
+  const all = [];
+  for (const [templateId, list] of groups) {
+    const ids = list.map(([id]) => id);
+    const mentions = ids.slice(0, 15).map((id) => `<#${id}>`).join(' ') + (ids.length > 15 ? ` +${ids.length - 15} more` : '');
+    all.push(
+      `**📋 ${escapeMarkdown(g.reactTemplates[templateId].name)}** template · ${ids.length} channel${ids.length === 1 ? '' : 's'}${botsText(list.map(([, c]) => c))}\n${mentions}\n${listText(list[0][1].emojis)}`,
+    );
+  }
+  for (const [channelId, c] of singles) {
     const channel = guild.channels.cache.get(channelId);
     const kind = channel && POST_CHANNELS.has(channel.type) ? ' · new posts' : '';
-    const block = `**<#${channelId}>**${kind} · ${c.bots === false ? '👤 members only' : '🤖 bots too'}\n${listText(c.emojis)}`;
+    all.push(`**<#${channelId}>**${kind}${botsText([c])}\n${listText(c.emojis)}`);
+  }
+  const blocks = [];
+  let used = 0;
+  for (const block of all) {
     if (used + block.length > 3200) {
-      blocks.push(`-# …and ${entries.length - blocks.length} more channel(s)`);
+      blocks.push(`-# …and ${all.length - blocks.length} more`);
       break;
     }
     blocks.push(block);
@@ -161,9 +182,20 @@ function listCard(guild) {
     .addTextDisplayComponents(ui.text(`## ✨ Auto reactions\n${blocks.join('\n\n')}`))
     .addSeparatorComponents(ui.divider())
     .addTextDisplayComponents(
-      ui.text(`-# I react to every new message in these channels, in this order · ${cmd('autoreact set')} · ${cmd('autoreact add')} · ${cmd('autoreact remove')}`),
+      ui.text(
+        `-# I react to every new message in these channels, in this order · ${cmd('autoreact set')} · ${cmd('autoreact add')} · ${cmd('autoreact remove')} · ${cmd('autoreact copy')} · ${cmd('autoreact template list')}`,
+      ),
     );
   return { components: [card], flags: ui.V2, allowedMentions: { parse: [] } };
+}
+
+/** When a channel that follows a template is changed on its own: the note and the "update the template instead" button. */
+function leftTemplate(guild, channel, link) {
+  const name = escapeMarkdown(link.t.name);
+  return {
+    note: `${channel} no longer follows the template “${name}”: it has its own list now.`,
+    buttons: [ui.button({ id: `rt:push:${channel.id}:${link.id}`, label: truncate(`Update template “${link.t.name}” to this instead`, 80), emoji: '📋' })],
+  };
 }
 
 /**
@@ -179,22 +211,31 @@ function saveChannel(guild, channel, list, bots, { title = 'Auto reactions on', 
   if (list.some((e) => e.id && !guild.emojis.cache.has(e.id))) perms.push('UseExternalEmojis');
   assertBotChannelPerms(channel, perms);
   const g = store.guild(guild.id);
-  g.autoReact[channel.id] = { emojis: list.map(({ id, name, animated }) => ({ id: id ?? null, name, animated: Boolean(animated) })), bots, updatedAt: Date.now() };
+  const { templateOfChannel, sameList } = require('./reactTemplates');
+  const link = templateOfChannel(guild.id, channel.id);
+  const stays = link && sameList(list, link.t.emojis); // same emojis as its template: it keeps following it
+  const cfg = { emojis: list.map(({ id, name, animated }) => ({ id: id ?? null, name, animated: Boolean(animated) })), bots, updatedAt: Date.now() };
+  if (stays) cfg.template = link.id;
+  g.autoReact[channel.id] = cfg;
   store.save(guild.id);
+  const left = link && !stays ? leftTemplate(guild, channel, link) : null;
   const lines = [
     `${channel}: every new ${POST_CHANNELS.has(channel.type) ? 'post' : 'message'} gets`,
     `## ${listText(list)}`,
     `-# In this order · ${bots ? '🤖 bot messages too' : '👤 members’ messages only'} · messages that are already there aren’t touched`,
     note ? `-# ${note}` : null,
+    left ? `-# ${left.note}` : null,
     list.length > 8 ? `-# Discord adds about 4 reactions a second, so ${list.length} emojis take a few seconds per message.` : null,
   ];
-  return ui.notice('success', title, lines.filter(Boolean).join('\n'));
+  return ui.notice('success', title, lines.filter(Boolean).join('\n'), { buttons: left?.buttons ?? [] });
 }
 
 async function command(interaction) {
   const guild = interaction.guild;
   const g = store.guild(guild.id);
+  if (interaction.options.getSubcommandGroup?.(false) === 'template') return require('./reactTemplates').templateCommand(interaction);
   const sub = interaction.options.getSubcommand();
+  if (sub === 'copy') return require('./reactTemplates').copyCommand(interaction);
 
   if (sub === 'set' || sub === 'add') {
     const channel = interaction.options.getChannel('channel', true);
@@ -227,19 +268,24 @@ async function command(interaction) {
     const cfg = g.autoReact[channel.id];
     if (!cfg) throw new UserError(`${channel} has no auto reactions.`, 'Nothing to remove');
     const input = interaction.options.getString('emoji')?.trim();
+    const link = require('./reactTemplates').templateOfChannel(guild.id, channel.id);
     if (!input) {
       delete g.autoReact[channel.id];
       store.save(guild.id);
-      return ui.respond(interaction, ui.notice('success', 'Auto reactions off', `I’ll stop reacting in ${channel}. Reactions I already added stay.`));
+      const was = link ? `\n-# It no longer follows the template “${escapeMarkdown(link.t.name)}”.` : '';
+      return ui.respond(interaction, ui.notice('success', 'Auto reactions off', `I’ll stop reacting in ${channel}. Reactions I already added stay.${was}`));
     }
     const target = findStored(cfg.emojis, input);
     if (!target) throw new UserError(`That emoji isn’t on ${channel}’s list. Pick one from the suggestions.`, 'Not on the list');
     cfg.emojis = cfg.emojis.filter((e) => e !== target);
     cfg.updatedAt = Date.now();
+    delete cfg.template;
     if (!cfg.emojis.length) delete g.autoReact[channel.id];
     store.save(guild.id);
     const rest = cfg.emojis.length ? `Still reacting with ${listText(cfg.emojis)}` : 'That was the last one, so auto reactions are now off there.';
-    return ui.respond(interaction, ui.notice('success', 'Emoji removed', `${emojiText(target)} is off ${channel}’s list.\n-# ${rest}`));
+    const left = link && cfg.emojis.length ? leftTemplate(guild, channel, link) : null;
+    const body = `${emojiText(target)} is off ${channel}’s list.\n-# ${rest}${left ? `\n-# ${left.note}` : ''}`;
+    return ui.respond(interaction, ui.notice('success', 'Emoji removed', body, { buttons: left?.buttons ?? [] }));
   }
 
   if (sub === 'list') return ui.respond(interaction, listCard(guild));
@@ -291,9 +337,16 @@ function forgetEmoji(guildId, emoji) {
     changed++;
     if (!cfg.emojis.length) delete map[channelId];
   }
-  if (!changed) return;
+  let templates = 0;
+  for (const t of Object.values(store.guilds[guildId]?.reactTemplates ?? {})) {
+    const before = t.emojis.length;
+    t.emojis = t.emojis.filter((e) => e.id !== emoji.id);
+    if (t.emojis.length !== before) templates++;
+  }
+  if (!changed && !templates) return;
   store.save(guildId);
-  log.warn(`Auto reactions: the emoji :${emoji.name}: was deleted from the server, so I took it off ${changed} channel list(s).`);
+  const where = [changed ? `${changed} channel list(s)` : null, templates ? `${templates} template(s)` : null].filter(Boolean).join(' and ');
+  log.warn(`Auto reactions: the emoji :${emoji.name}: was deleted from the server, so I took it off ${where}.`);
 }
 
 async function reactAll(message, emojis) {

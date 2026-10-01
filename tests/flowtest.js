@@ -243,7 +243,7 @@ const client = { user: botUser, guilds: { fetch: async () => guild } };
 guild.client = client;
 
 /* ───────────── interaction factory ───────────── */
-function interaction({ type, commandName, sub, options = {}, customId, fields = {}, values, targetMessage, member = admin, fromMessage = false }) {
+function interaction({ type, commandName, group = null, sub, options = {}, customId, fields = {}, values, targetMessage, member = admin, fromMessage = false }) {
   const i = {
     id: nextId(),
     type,
@@ -270,9 +270,12 @@ function interaction({ type, commandName, sub, options = {}, customId, fields = 
     isModalSubmit: () => type === 'modal',
     isButton: () => type === 'button',
     isStringSelectMenu: () => type === 'select',
+    isChannelSelectMenu: () => type === 'channelSelect',
+    isMessageComponent: () => ['button', 'select', 'channelSelect'].includes(type),
     isFromMessage: () => fromMessage,
     options: {
       getSubcommand: () => sub,
+      getSubcommandGroup: () => group,
       getChannel: (n) => options[n] ?? null,
       getString: (n) => options[n] ?? null,
       getRole: (n) => options[n] ?? null,
@@ -1266,6 +1269,165 @@ async function step(name, fn) {
     const { sid } = picker(r.payload);
     const e = await run('not yours', { type: 'button', customId: `ep:c:${sid}`, fromMessage: true, member: user }, { expectError: true });
     assert.ok(texts(e.payload).includes('belongs to someone else'));
+  });
+
+  console.log('Emoji templates & copy');
+  const CT = ChannelType;
+  const cat = mockChannel('200000000000000010', 'COMMUNITY', CT.GuildCategory);
+  const clips = Object.assign(mockChannel('200000000000000011', 'clips'), { parentId: cat.id });
+  const memes = Object.assign(mockChannel('200000000000000012', 'memes'), { parentId: cat.id });
+  const lounge = Object.assign(mockChannel('200000000000000013', 'Lounge', CT.GuildVoice), { parentId: cat.id });
+  const locked = mockChannel('200000000000000014', 'read-only');
+  locked.permissionsFor = () => ({ has: (p) => p === PermissionFlagsBits.ViewChannel }); // I can see it, but not react
+  const template = (name, sub, options, opts) => run(name, { type: 'slash', commandName: 'autoreact', group: 'template', sub, options }, opts);
+  const chooserSid = (payload) => texts(payload).match(/"rt:ok:([0-9a-f]+)"/)?.[1];
+  const pickChannels = (name, sid, values) => run(name, { type: 'channelSelect', customId: `rt:ch:${sid}`, values, fromMessage: true });
+  const pickCategories = (name, sid, values) => run(name, { type: 'channelSelect', customId: `rt:cat:${sid}`, values, fromMessage: true });
+  const chatChannels = () => [...guild.channels.cache.values()].filter((c) => [CT.GuildText, CT.GuildAnnouncement, CT.GuildForum, CT.GuildMedia].includes(c.type));
+  const names = (list) => list.map((e) => e.id ?? e.name);
+  const following = (id) => Object.entries(g().autoReact).filter(([, c]) => c.template === id);
+  const hype = {}; // the template made in the second step
+
+  await step('/autoreact copy → pick channels + a whole category → Apply: same emojis and bots setting everywhere', async () => {
+    await autoreact('autoreact chat for copy', 'set', { channel: chat, emojis: ':hype: 🔥', bots: false });
+    const r = await autoreact('autoreact copy', 'copy', { from: chat });
+    const sid = chooserSid(r.payload);
+    assert.ok(sid && texts(r.payload).includes('Copy auto reactions') && texts(r.payload).includes('👤 members only'));
+    let u = await pickChannels('pick channels', sid, [C.news.id, chat.id]);
+    assert.ok(texts(u.payload).includes('1 channel selected'), 'the channel it copies from is left out');
+    u = await pickCategories('pick category', sid, [cat.id]);
+    assert.ok(texts(u.payload).includes('3 channels selected'), 'news + clips + memes: voice chats only when picked one by one');
+    assert.ok(!texts(u.payload).includes(`<#${lounge.id}>`));
+    const done = await click('apply copy', `rt:ok:${sid}`);
+    assert.equal(done.kind, 'update');
+    assert.ok(texts(done.payload).includes('Copied to 3 channels'));
+    for (const ch of [C.news, clips, memes]) {
+      assert.deepEqual(names(g().autoReact[ch.id].emojis), [EMO.hype.id, '🔥']);
+      assert.equal(g().autoReact[ch.id].bots, false, 'the bots setting is copied too');
+      assert.equal(g().autoReact[ch.id].template, undefined);
+    }
+    const m = incoming(memes);
+    await autoReact.onMessage(m);
+    assert.deepEqual(reactedWith(m), [tag(EMO.hype), '🔥']);
+    await run('copy list gone', { type: 'button', customId: `rt:ok:${sid}`, fromMessage: true }, { expectError: true });
+  });
+
+  await step('/autoreact template create → pick emojis → Save → Use in channels → All chat channels → Apply (no-permission channel skipped)', async () => {
+    const r = await template('template create', 'create', { name: 'Hype' });
+    const p = picker(r.payload);
+    assert.ok(p.json.includes('Template “Hype”') && p.json.includes('Save template (0)'));
+    await tick('tick 3', p.sid, 0, [blobs[0].id, blobs[1].id, blobs[2].id]);
+    const saved = await click('save template', `ep:ok:${p.sid}`);
+    assert.ok(texts(saved.payload).includes('Template “Hype” saved'));
+    const [id, t] = Object.entries(g().reactTemplates)[0];
+    hype.id = id;
+    assert.deepEqual(t.emojis.map((e) => e.name), ['blob_000', 'blob_001', 'blob_002']);
+    assert.ok(texts(saved.payload).includes(`"rt:use:${id}"`), 'a button to put it on channels');
+    const use = await click('use in channels', `rt:use:${id}`);
+    assert.equal(use.kind, 'update');
+    const sid = chooserSid(use.payload);
+    const u = await click('all chat channels', `rt:all:${sid}`);
+    const expected = chatChannels().filter((c) => c.id !== locked.id);
+    assert.ok(texts(u.payload).includes(`${expected.length} channels selected`));
+    assert.ok(texts(u.payload).includes(`I can’t react in <#${locked.id}>`) && texts(u.payload).includes('Add Reactions'));
+    const done = await click('apply template', `rt:ok:${sid}`);
+    assert.ok(texts(done.payload).includes(`“Hype” is on ${expected.length} channels`) && texts(done.payload).includes('Skipped'));
+    for (const c of expected) {
+      assert.equal(g().autoReact[c.id].template, id, `#${c.name} follows the template`);
+      assert.deepEqual(g().autoReact[c.id].emojis.map((e) => e.name), ['blob_000', 'blob_001', 'blob_002']);
+    }
+    assert.equal(g().autoReact[locked.id], undefined);
+    assert.equal(g().autoReact[lounge.id], undefined, 'voice chats only when picked');
+    assert.equal(g().autoReact[clips.id].bots, false, 'every channel keeps its own bots setting');
+    assert.equal(g().autoReact[C.roles.id].bots, true);
+  });
+
+  await step('/autoreact template edit → every channel using it updates; a channel changed on its own leaves it (and can push its list back)', async () => {
+    const { id } = hype;
+    let r = await autoreact('autoreact add to clips', 'add', { channel: clips, emojis: '🎉' });
+    assert.ok(texts(r.payload).includes('no longer follows the template “Hype”') && texts(r.payload).includes(`"rt:push:${clips.id}:${id}"`));
+    assert.equal(g().autoReact[clips.id].template, undefined);
+    const users = following(id).length;
+    r = await template('template edit', 'edit', { name: id });
+    const p = picker(r.payload);
+    assert.match(p.json, /Chosen 3\/20/);
+    assert.ok(p.json.includes(`used in ${users} channels: they all update when you save`));
+    await tick('untick blob_001, tick blob_003', p.sid, 0, [blobs[0].id, blobs[2].id, blobs[3].id]);
+    const saved = await click('save edit', `ep:ok:${p.sid}`);
+    assert.ok(texts(saved.payload).includes('Template “Hype” updated') && texts(saved.payload).includes(`Updated in ${users} channels`));
+    const want = [blobs[0], blobs[2], blobs[3]];
+    for (const [, cfg] of following(id)) assert.deepEqual(names(cfg.emojis), names(want));
+    const own = [...names([blobs[0], blobs[1], blobs[2]]), '🎉']; // the template's old list + 🎉
+    assert.deepEqual(names(g().autoReact[clips.id].emojis), own, '#clips kept its own list');
+    const m = incoming(C.other);
+    await autoReact.onMessage(m);
+    assert.deepEqual(reactedWith(m), want.map(tag), 'new messages get the new list');
+    const pushed = await click('push to template', `rt:push:${clips.id}:${id}`);
+    assert.ok(texts(pushed.payload).includes('Template “Hype” updated'));
+    assert.equal(g().autoReact[clips.id].template, id, '#clips follows it again');
+    assert.equal(following(id).length, users + 1);
+    for (const [, cfg] of following(id)) assert.deepEqual(names(cfg.emojis), own);
+  });
+
+  await step('template from a channel · duplicate names · autocomplete · list cards grouped by template', async () => {
+    let r = await template('duplicate name', 'create', { name: '  hype ' }, { expectError: true });
+    assert.ok(texts(r.payload).includes('already have a template called'));
+    r = await autoreact('welcome own list', 'set', { channel: C.welcome, emojis: '👋 🎉' });
+    assert.ok(texts(r.payload).includes('no longer follows the template'));
+    r = await template('template from channel', 'create', { name: 'Welcome wave', from: C.welcome });
+    assert.ok(texts(r.payload).includes('Template “Welcome wave” saved') && texts(r.payload).includes(`<#${C.welcome.id}>`));
+    const [wid] = Object.entries(g().reactTemplates).find(([, t]) => t.name === 'Welcome wave');
+    hype.wid = wid;
+    assert.equal(g().autoReact[C.welcome.id].template, wid, 'the channel it came from follows it');
+    await template('from a channel without reactions', 'create', { name: 'Nope', from: lounge }, { expectError: true });
+    const ac = await run('template autocomplete', { type: 'autocomplete', commandName: 'autoreact', options: { focused: 'name', name: 'WEL' } });
+    assert.deepEqual(ac.payload, [{ name: 'Welcome wave · 2 emojis · used in 1 channel', value: wid }]);
+    r = await template('template list', 'list', {});
+    assert.ok(texts(r.payload).includes('📋 Hype') && texts(r.payload).includes('📋 Welcome wave'));
+    assert.ok(texts(r.payload).includes('"rt:apply"') && texts(r.payload).includes('"rt:edit"'));
+    r = await autoreact('autoreact list grouped', 'list', {});
+    assert.ok(texts(r.payload).includes(`**📋 Hype** template · ${following(hype.id).length} channels`));
+  });
+
+  await step('template list menus → apply / edit; emoji deleted → off templates too; delete keeps the channels’ emojis', async () => {
+    const { id, wid } = hype;
+    const u = await run('menu: apply', { type: 'select', customId: 'rt:apply', values: [wid], fromMessage: true });
+    assert.ok(texts(u.payload).includes('Use the template “Welcome wave”'));
+    const sid = chooserSid(u.payload);
+    const picked = await pickChannels('pick news', sid, [C.news.id]);
+    assert.ok(texts(picked.payload).includes('1 of them already has other auto reactions'));
+    const c = await click('cancel chooser', `rt:x:${sid}`);
+    assert.ok(texts(c.payload).includes('Cancelled'));
+    assert.equal(g().autoReact[C.news.id].template, id, 'cancel changes nothing');
+    const e = await run('menu: edit', { type: 'select', customId: 'rt:edit', values: [wid], fromMessage: true });
+    assert.equal(e.kind, 'update');
+    assert.ok(picker(e.payload).json.includes('Template “Welcome wave”'));
+    const byName = await template('apply by typed name', 'apply', { name: 'welcome WAVE' });
+    assert.ok(texts(byName.payload).includes('Use the template “Welcome wave”'));
+    autoReact.onEmojiDelete({ id: blobs[1].id, name: 'blob_001', guild });
+    const left = [blobs[0].id, blobs[2].id, '🎉'];
+    assert.deepEqual(names(g().reactTemplates[id].emojis), left, 'taken off the template');
+    for (const [, cfg] of following(id)) assert.deepEqual(names(cfg.emojis), left);
+    const users = following(id).map(([chId]) => chId);
+    const r = await template('template delete', 'delete', { name: 'hype' });
+    assert.ok(texts(r.payload).includes('Template “Hype” deleted') && texts(r.payload).includes('keep their emojis'));
+    assert.equal(g().reactTemplates[id], undefined);
+    for (const chId of users) {
+      assert.equal(g().autoReact[chId].template, undefined);
+      assert.deepEqual(names(g().autoReact[chId].emojis), left, 'still reacting');
+    }
+  });
+
+  await step('only the opener can use a channel list · unknown template · nothing to copy · leaving a template by removing an emoji', async () => {
+    const r = await template('apply again', 'apply', { name: hype.wid });
+    const sid = chooserSid(r.payload);
+    const e = await run('not yours', { type: 'button', customId: `rt:all:${sid}`, fromMessage: true, member: user }, { expectError: true });
+    assert.ok(texts(e.payload).includes('belongs to someone else'));
+    await template('unknown template', 'edit', { name: 'nothing like this' }, { expectError: true });
+    await autoreact('copy from nothing', 'copy', { from: lounge }, { expectError: true });
+    const off = await autoreact('remove from a follower', 'remove', { channel: C.welcome, emoji: '🎉' });
+    assert.ok(texts(off.payload).includes('no longer follows the template “Welcome wave”') && texts(off.payload).includes('rt:push'));
+    assert.equal(g().autoReact[C.welcome.id].template, undefined);
   });
 
   await store.flush();

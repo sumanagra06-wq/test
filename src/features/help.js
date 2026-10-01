@@ -36,6 +36,8 @@ function helpCard(guild, botUser) {
         '### ✨ Reactions',
         `${cmd('autoreact set')} — your server emojis on every new message in a channel (leave emojis empty to pick from a list)`,
         `${cmd('autoreact add')} · ${cmd('autoreact remove')} · ${cmd('autoreact list')}`,
+        `${cmd('autoreact copy')} — copy a channel’s emojis to many channels at once`,
+        `${cmd('autoreact template create')} · ${cmd('autoreact template apply')} · ${cmd('autoreact template edit')} — one emoji list for many channels: edit it once, they all update`,
         `${cmd('react')} — the bot reacts to any message (ID or link) with emojis picked from a list`,
         'Right-click any message → **Apps → React as Bot**',
       ].join('\n'),

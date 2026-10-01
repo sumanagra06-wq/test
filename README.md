@@ -7,6 +7,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 | 🎛️ **Button roles** | Modern role panels in 3 styles (list cards · button grid · dropdown), 3 modes (toggle · one-at-a-time · add-only), per-role emoji/description/colour, banners, and a private **“My roles”** manager for every member |
 | 😀 **Reaction roles** | Bot panels that list their roles automatically, or reaction roles on **any** existing message. Modes: normal · one-at-a-time · verify |
 | ✨ **Auto reactions** | Pick a channel and up to **20 of your server emojis**: the bot reacts to **every new message** there (members, other bots, webhooks, and its own announcements and welcomes), always in your order |
+| 📋 **Emoji templates** | Set your emojis once and put them on **many channels at once**: pick channels, whole categories, or all chat channels. Edit a template and every channel using it updates. Or just copy one channel's emojis to others |
 | 😀 **React to any message** | `/react` with a message ID or link, or right-click → **Apps → React as Bot**. Emojis are picked from a **clickable list** of your server's emojis (animated ones too, no Nitro needed) |
 | 📢 **Announcements** | Official posts under the bot's name: a big composer (2 × 4,000 characters, auto-split), up to **10 attachments**, ping @everyone/@here/roles, card or plain style, private **preview** before publishing, edit after posting, “Post as Announcement” from any draft message |
 | 👋 **Welcome** | Generated **image banner** (avatar, name, member #) **or** a clean text card — switch any time — plus Rules/Roles buttons, auto-role and custom backgrounds |
@@ -44,7 +45,7 @@ A custom Discord bot for **AetherBrackets**, built with **discord.js v14** and D
 |---|---|---|
 | `/buttonroles` | Manage Roles | `create` · `add` · `remove` · `edit` · `repost` · `delete` · `list` |
 | `/reactionroles` | Manage Roles | `create` · `add` · `remove` · `mode` · `clear` · `list` |
-| `/autoreact` | Manage Server | `set` · `add` · `remove` · `list`: your emojis on every new message in a channel (leave `emojis` empty to pick from a list) |
+| `/autoreact` | Manage Server | `set` · `add` · `remove` · `list`: your emojis on every new message in a channel (leave `emojis` empty to pick from a list) · `copy` and `template create` · `apply` · `edit` · `delete` · `list`: the same emojis on many channels at once |
 | `/react` | Manage Server | The bot reacts to any message: give its ID or link, then tick emojis in a list |
 | `/announce` | Manage Server | Compose an official post: preview, ping, up to 10 attachments |
 | `/welcome` | Manage Server | `setup` · `message` · `image` · `buttons` · `autorole` · `toggle` · `test` · `settings` |

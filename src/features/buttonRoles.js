@@ -209,6 +209,9 @@ function renderManager(guild, panel, have, status) {
 
   const useSelect = effectiveStyle(panel) === 'dropdown' || panel.roles.length > MANAGER_LIST_MAX;
   if (useSelect) {
+    // "one at a time" allows one tick: if the member somehow has several of these roles, tick the first
+    const firstHeld = panel.roles.find((r) => have.has(r.roleId))?.roleId;
+    const ticked = (id) => (panel.mode === 'unique' ? id === firstHeld : have.has(id));
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`br:ms:${panel.id}`)
       .setPlaceholder(panel.mode === 'unique' ? 'Pick one role…' : 'Select the roles you want…')
@@ -219,7 +222,7 @@ function renderManager(guild, panel, have, status) {
           const o = new StringSelectMenuOptionBuilder()
             .setLabel(truncate(r.label, 100))
             .setValue(r.roleId)
-            .setDefault(have.has(r.roleId));
+            .setDefault(ticked(r.roleId));
           if (r.description) o.setDescription(truncate(r.description, 100));
           if (r.emoji) o.setEmoji(emojiComponent(r.emoji));
           return o;

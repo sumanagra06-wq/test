@@ -22,6 +22,7 @@ const help = require('../src/features/help');
 const serverIds = require('../src/features/serverIds');
 const autoReact = require('../src/features/autoReact');
 const reactPicker = require('../src/features/reactPicker');
+const reactTemplates = require('../src/features/reactTemplates');
 const { commands } = require('../src/commands');
 const { colorChoices } = require('../src/interactions');
 
@@ -202,7 +203,26 @@ function panel(style, mode, n, extra = {}) {
     assert.equal(ids?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/ids is for staff');
     const ar = commands.find((c) => c.name === 'autoreact');
     assert.equal(ar?.default_member_permissions, String(PermissionFlagsBits.ManageGuild), '/autoreact is for staff');
-    assert.deepEqual(ar.options.map((o) => o.name), ['set', 'add', 'remove', 'list']);
+    assert.deepEqual(ar.options.map((o) => o.name), ['set', 'add', 'remove', 'list', 'copy', 'template']);
+    const tpl = ar.options.find((o) => o.name === 'template');
+    assert.equal(tpl.type, 2, 'template is a subcommand group');
+    assert.deepEqual(tpl.options.map((o) => o.name), ['create', 'apply', 'edit', 'delete', 'list']);
+    for (const sub of ['apply', 'edit', 'delete']) {
+      const opt = tpl.options.find((o) => o.name === sub).options[0];
+      assert.ok(opt.name === 'name' && opt.required && opt.autocomplete, `${sub}: pick the template from suggestions`);
+    }
+    const create = tpl.options.find((o) => o.name === 'create').options;
+    assert.deepEqual(create.map((o) => [o.name, Boolean(o.required)]), [['name', true], ['from', false]]);
+    assert.equal(create[0].max_length, 32);
+    assert.deepEqual(ar.options.find((o) => o.name === 'copy').options.map((o) => [o.name, Boolean(o.required)]), [['from', true]]);
+    // Discord rejects a command whose required options come after optional ones
+    const walk = (opts = []) => {
+      const flags = opts.filter((o) => o.type > 2).map((o) => Boolean(o.required));
+      assert.ok(flags.indexOf(false) === -1 || flags.lastIndexOf(true) < flags.indexOf(false), 'required options first');
+      for (const o of opts) if (o.type <= 2) walk(o.options);
+      for (const o of opts) assert.ok(o.description.length >= 1 && o.description.length <= 100, `${o.name}: description length`);
+    };
+    for (const c of commands) walk(c.options);
     const channelTypes = ar.options[0].options.find((o) => o.name === 'channel').channel_types;
     for (const t of [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum, ChannelType.PublicThread]) assert.ok(channelTypes.includes(t));
     assert.equal(ar.options[0].options.find((o) => o.name === 'emojis').required, false, 'empty emojis → pick from a list');
@@ -567,7 +587,7 @@ function panel(style, mode, n, extra = {}) {
       store.guild(guild.id).autoReact = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(210000000000000000n + BigInt(i)), { emojis: big, bots: i % 2 === 0 }]));
       const card = autoReact.listCard(guild);
       results.push(['auto reactions list (30 channels × 20)', validatePayload('autoreact list', card)]);
-      assert.match(JSON.stringify(card.components), /…and \d+ more channel/);
+      assert.match(JSON.stringify(card.components), /…and \d+ more/);
       store.guild(guild.id).autoReact = { '200000000000000001': { emojis: [{ id: null, name: '🔥', animated: false }, big[0]], bots: false } };
       const small = JSON.stringify(autoReact.listCard(guild).components);
       assert.ok(small.includes('🔥 <a:emoji_with_a_long_name_00:310000000000000000>') && small.includes('👤 members only'));
@@ -576,6 +596,81 @@ function panel(style, mode, n, extra = {}) {
     } finally {
       store.guild(guild.id).autoReact = saved;
     }
+  });
+
+  check('emoji templates: channel chooser, cards, limits', () => {
+    const CT = ChannelType;
+    const chans = new Collection();
+    let seq = 220000000000000000n;
+    const ch = (name, type, parentId = null, { see = true, react = true } = {}) => {
+      const id = String(seq++);
+      chans.set(id, { id, name, type, parentId, permissionsFor: () => ({ has: (p) => (p === PermissionFlagsBits.ViewChannel ? see : see && react) }) });
+      return id;
+    };
+    const cat = ch('COMMUNITY', CT.GuildCategory);
+    const inCat = Array.from({ length: 6 }, (_, i) => ch(`community-${i}`, i === 5 ? CT.GuildForum : CT.GuildText, cat));
+    const voice = ch('Lounge', CT.GuildVoice, cat);
+    const loose = Array.from({ length: 40 }, (_, i) => ch(`channel-with-a-long-name-${String(i).padStart(2, '0')}`, CT.GuildText));
+    const hidden = ch('staff-only', CT.GuildText, null, { see: false });
+    const readOnly = ch('read-only', CT.GuildAnnouncement, null, { react: false });
+    const thread = ch('a-thread', CT.PublicThread, loose[0]);
+    const list = Array.from({ length: 20 }, (_, i) => ({ id: String(311000000000000000n + BigInt(i)), name: `animated_emoji_long_name_${String(i).padStart(2, '0')}`, animated: true }));
+    const server = { id: '100000000000000777', channels: { cache: chans }, emojis: { cache: new Collection(list.map((e) => [e.id, e])) }, members: { me: {} } };
+    const g = store.guild(server.id);
+    g.reactTemplates = { t00000001: { name: 'Hype *bold*', emojis: list, createdAt: 1, updatedAt: 1 } };
+    g.autoReact = { [loose[1]]: { emojis: list, bots: true, template: 't00000001' }, [loose[2]]: { emojis: list.slice(0, 2), bots: false } };
+    const fake = { user: { id: '100000000000000009' }, guildId: server.id };
+    const json = (p) => JSON.stringify(p.components.map((c) => (c.toJSON ? c.toJSON() : c)));
+    const parts = (p) => p.components[0].toJSON().components;
+    const buttons = (p) => parts(p).filter((c) => c.type === 1 && c.components[0].type === 2).flatMap((r) => r.components);
+    const menus = (p) => parts(p).filter((c) => c.type === 1 && c.components[0].type === 8).map((r) => r.components[0]);
+    const chatCount = 6 + 40 + 1; // community + loose + read-only (hidden: can't see it · voice and threads: not chat channels)
+
+    const s = reactTemplates.newSession(fake, { mode: 'template', templateId: 't00000001' });
+    let p = reactTemplates.chooser(server, s);
+    results.push(['template chooser (nothing picked)', validatePayload('chooser empty', p)]);
+    assert.ok(json(p).includes('Use the template “Hype \\\\*bold\\\\*”'), 'name shown with its markdown escaped');
+    assert.equal(menus(p).length, 2, 'channels + categories');
+    assert.deepEqual(menus(p)[1].channel_types, [CT.GuildCategory]);
+    assert.ok(menus(p)[0].channel_types.includes(CT.PublicThread) && menus(p)[0].max_values === 25 && menus(p)[0].min_values === 0);
+    assert.deepEqual(buttons(p).map((b) => b.label), [`All chat channels (${chatCount})`, 'Clear', 'Apply', 'Cancel']);
+    assert.ok(buttons(p)[2].disabled && buttons(p)[1].disabled, 'nothing to apply or clear yet');
+
+    s.all = true;
+    p = reactTemplates.chooser(server, s);
+    results.push(['template chooser (all chat channels)', validatePayload('chooser all', p)]);
+    assert.ok(json(p).includes(`${chatCount - 1} channels selected`), 'every chat channel I can react in');
+    assert.ok(json(p).includes(`+${chatCount - 1 - 20} more`));
+    assert.ok(json(p).includes('I can’t react in') && json(p).includes(`<#${readOnly}>`) && json(p).includes('**Add Reactions**'));
+    assert.ok(!json(p).includes(`<#${hidden}>`) && !json(p).includes(`<#${voice}>`) && !json(p).includes(`<#${thread}>`));
+    assert.ok(json(p).includes('1 of them already has other auto reactions'), 'only the channel with a different list counts as replaced');
+    assert.equal(buttons(p)[0].style, 1, 'toggle shows as on');
+    assert.equal(buttons(p)[2].label, `Apply to ${chatCount - 1} channels`);
+
+    s.all = false;
+    s.categories = [cat];
+    s.picked = [voice, thread, loose[3]];
+    p = reactTemplates.chooser(server, s);
+    assert.ok(json(p).includes('9 channels selected'), '6 in the category + 3 picked one by one (voice and threads only when picked)');
+    assert.deepEqual(menus(p)[0].default_values.map((d) => d.id), [voice, thread, loose[3]]);
+    assert.deepEqual(menus(p)[1].default_values.map((d) => d.id), [cat]);
+
+    const copy = reactTemplates.newSession(fake, { mode: 'copy', sourceId: loose[2], all: true });
+    p = reactTemplates.chooser(server, copy);
+    results.push(['copy chooser (all chat channels)', validatePayload('copy all', p)]);
+    assert.ok(json(p).includes('Copy auto reactions') && json(p).includes('👤 members only'));
+    assert.ok(json(p).includes(`All chat channels (${chatCount - 1})`), 'the source channel itself is left out');
+
+    // the template list: 25 templates with 20 emojis each, all in the menus
+    g.reactTemplates = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`t${String(i).padStart(8, '0')}`, { name: `Template number ${i}`, emojis: list }]));
+    const card = reactTemplates.templateListCard(server);
+    results.push(['template list (25 × 20 emojis)', validatePayload('template list', card)]);
+    const lists = parts(card).filter((c) => c.type === 1).map((r) => r.components[0]);
+    assert.deepEqual(lists.map((l) => [l.custom_id, l.options.length]), [['rt:apply', 25], ['rt:edit', 25]]);
+    assert.match(json(card), /…and \d+ more/);
+    assert.equal(reactTemplates.templateChoices(server, 'number 1').length, 11, '1 and 10-19');
+    g.reactTemplates = {};
+    assert.match(json(reactTemplates.templateListCard(server)), /No templates yet/);
   });
 
   // help + notices

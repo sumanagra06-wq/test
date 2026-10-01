@@ -32,6 +32,7 @@ src/
 │   ├── reactionRoles.js  Reaction-role panels, reaction events, /reactionroles
 │   ├── autoReact.js      Auto reactions: /autoreact, reacting to new messages (queued per channel, in order)
 │   ├── reactPicker.js    Clickable emoji list (pages, search) + /react and “React as Bot”
+│   ├── reactTemplates.js Emoji templates + /autoreact copy: one emoji list on many channels (channel chooser)
 │   ├── announcements.js  Composer, private preview, publish/edit, right-click apps, /announce
 │   ├── welcome.js        Welcome messages, auto-role, /welcome
 │   ├── serverIds.js      /ids: channel + role map with IDs (pages + .txt file)
@@ -44,8 +45,8 @@ src/
     ├── color.js          Colour names (purple, gold…) → hex
     └── log.js            Timestamped console logging
 tests/
-├── selftest.js           98 checks of every message/form against Discord's layout limits
-├── flowtest.js           55 end-to-end flows through the real handlers on a mock Discord server
+├── selftest.js           99 checks of every message/form against Discord's layout limits
+├── flowtest.js           61 end-to-end flows through the real handlers on a mock Discord server
 └── helpers/validate.js   Payload validator shared by the tests and the preview tool
 tools/
 └── preview-html.js       Rebuilds docs/previews/ from the bot's real message payloads
@@ -74,6 +75,7 @@ Custom IDs on buttons, menus and forms start with a prefix that tells `interacti
 | `wl:` | Welcome (message form) |
 | `ids:` | `/ids` page buttons (`ids:go:<page>:<button>`) |
 | `ep:` | Emoji list: dropdowns `ep:s:<list>:<slot>`, pages, search, type, clear, confirm, cancel (lists live in memory for 30 minutes) |
+| `rt:` | Emoji templates: channel chooser `rt:ch:<list>` / `rt:cat:<list>` (channel menus), `rt:all`, `rt:c`, `rt:ok`, `rt:x` (30 minutes in memory); `rt:use:<template>`, the template list menus `rt:apply` / `rt:edit`, and `rt:push:<channel>:<template>` |
 
 **Long announcements.** `renderParts()` splits the text with `chunkText()` (preferring a cut right before a heading, and never right after a line ending in “:”), then returns each part as `{ payload, quiet }`. A part that must not notify on arrival (parts 2+ of a pinged post, or every part of an edit or repost) is sent as `quiet` first: the same text, but with the ping not switched on and without files. It is then edited into `payload`. Discord re-reads mentions when a message is edited, so the part turns gold without notifying anyone. Discord’s `SUPPRESS_NOTIFICATIONS` (“silent”) flag is deliberately **not** used: the client always shows a new name header when a silent message follows a normal one.
 
@@ -87,9 +89,12 @@ One record per server:
   reactionRoles: { [messageId]: { channelId, mode, panel?, entries: [...] } },
   buttonPanels:  { [panelId]:   { ...panel settings and roles } },
   announcements: { [firstMessageId]: { ...record used by “Edit Announcement” } },  // re-keyed to the next part if part 1 is deleted
-  autoReact:     { [channelId]: { emojis: [{ id, name, animated }], bots } },    // id: null for normal emojis
+  autoReact:     { [channelId]: { emojis: [{ id, name, animated }], bots, template? } },  // id: null for normal emojis
+  reactTemplates:{ [templateId]: { name, emojis: [{ id, name, animated }] } },   // templateId: "t" + 8 hex characters
 }
 ```
+
+**Emoji templates.** Every channel keeps its own copy of the emojis, so reacting never looks a template up. A channel that follows a template also stores `template: <id>`. Saving a template (`saveFromPicker`, `pushToTemplate`) copies its emojis to every channel with that `template`. Changing a channel on its own (`saveChannel`, `remove`) drops the link, unless the new list is exactly the template's. Deleting an emoji from the server (`forgetEmoji`) takes it off channels and templates alike.
 
 ## Scripts & tests
 

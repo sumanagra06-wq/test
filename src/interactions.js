@@ -12,6 +12,7 @@ const help = require('./features/help');
 const serverIds = require('./features/serverIds');
 const autoReact = require('./features/autoReact');
 const reactPicker = require('./features/reactPicker');
+const reactTemplates = require('./features/reactTemplates');
 
 const slashCommands = {
   announce: announcements.command,
@@ -43,6 +44,7 @@ const componentHandlers = {
   br: buttonRoles.onComponent,
   ids: serverIds.onComponent,
   ep: reactPicker.onComponent,
+  rt: reactTemplates.onComponent,
 };
 
 function colorChoices(query) {
@@ -67,6 +69,7 @@ async function autocomplete(interaction) {
   let choices = [];
   if (focused.name === 'panel') choices = buttonRoles.panelChoices(guild, focused.value);
   else if (focused.name === 'message') choices = reactionRoles.messageChoices(guild, focused.value);
+  else if (focused.name === 'name' && interaction.commandName === 'autoreact') choices = reactTemplates.templateChoices(guild, focused.value);
   else if (focused.name === 'emoji' && interaction.commandName === 'autoreact') {
     const channelId = interaction.options.get?.('channel')?.value ?? interaction.options.getChannel?.('channel')?.id;
     choices = autoReact.emojiChoices(guild, channelId, focused.value);
@@ -99,7 +102,10 @@ function explain(err) {
 }
 
 function describe(interaction) {
-  if (interaction.isChatInputCommand?.()) return `/${interaction.commandName} ${interaction.options.getSubcommand(false) ?? ''}`.trim();
+  if (interaction.isChatInputCommand?.()) {
+    const path = [interaction.options.getSubcommandGroup?.(false), interaction.options.getSubcommand(false)].filter(Boolean).join(' ');
+    return `/${interaction.commandName} ${path}`.trim();
+  }
   if (interaction.isCommand?.()) return interaction.commandName;
   return interaction.customId ?? 'interaction';
 }
@@ -114,7 +120,7 @@ async function route(interaction) {
   if (interaction.isMessageContextMenuCommand()) return contextMenus[interaction.commandName]?.(interaction);
   const ns = interaction.customId?.split(':')[0];
   if (interaction.isModalSubmit()) return modalHandlers[ns]?.(interaction);
-  if (interaction.isButton() || interaction.isStringSelectMenu()) return componentHandlers[ns]?.(interaction);
+  if (interaction.isMessageComponent()) return componentHandlers[ns]?.(interaction); // buttons and every kind of dropdown
 }
 
 module.exports = async function handleInteraction(interaction) {
